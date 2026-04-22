@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config liburing-dev
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTS=ON
+          -DBUILD_EXAMPLES=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install
+        run: cmake --install build --prefix "$PWD/install"
+
+      - name: Smoke consumer
+        run: |
+          mkdir -p smoke
+          cat > smoke/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(iouring_runtime_smoke LANGUAGES CXX)
+          find_package(iouring_runtime CONFIG REQUIRED)
+          add_executable(smoke main.cpp)
+          target_link_libraries(smoke PRIVATE iouring_runtime::Runtime)
+          EOF
+          cat > smoke/main.cpp <<'EOF'
+          #include <iouring_runtime/core/IoRing.h>
+
+          int main() {
+              iouring_runtime::core::ring::IoRing ring(64);
+              return ring.Size() > 0 ? 0 : 1;
+          }
+          EOF
+          cmake -S smoke -B smoke/build -G Ninja -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build smoke/build
