@@ -13,6 +13,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 set(IORUNTIME_PACKAGE_NAME iouring_runtime)
+set(IORUNTIME_WEB_PACKAGE_NAME iouring_runtime_web)
 
 FetchContent_Declare(
     spdlog
@@ -25,6 +26,21 @@ FetchContent_MakeAvailable(spdlog)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(URING REQUIRED IMPORTED_TARGET liburing)
 find_package(Threads REQUIRED)
+
+option(BUILD_WEB "Build the optional HTTP web module" OFF)
+
+if(BUILD_WEB)
+    FetchContent_Declare(
+        llhttp
+        GIT_REPOSITORY https://github.com/nodejs/llhttp.git
+        GIT_TAG        release/v9.3.1
+        GIT_SHALLOW    TRUE
+    )
+    set(LLHTTP_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+    set(LLHTTP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_MakeAvailable(llhttp)
+endif()
 
 option(IORUNTIME_TRACY "Enable Tracy Profiler" OFF)
 if(IORUNTIME_TRACY)
@@ -94,11 +110,47 @@ endif()
 
 target_compile_options(Runtime PRIVATE -Wall -Wextra -Wpedantic)
 
+if(BUILD_WEB)
+    add_library(RuntimeWeb STATIC
+        src/web/HttpParser.cpp
+        src/web/HttpResponse.cpp
+        src/web/RadixTree.cpp
+        src/web/Router.cpp
+        src/web/HttpSession.cpp
+        src/web/WebServer.cpp
+    )
+
+    add_library(${IORUNTIME_WEB_PACKAGE_NAME}::RuntimeWeb ALIAS RuntimeWeb)
+
+    target_include_directories(RuntimeWeb
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+        PRIVATE
+            ${llhttp_SOURCE_DIR}/include
+            ${spdlog_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(RuntimeWeb
+        PUBLIC
+            Runtime
+        PRIVATE
+            llhttp_static
+    )
+
+    target_compile_options(RuntimeWeb PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 option(BUILD_EXAMPLES "Build runtime examples" ON)
 set(_EXAMPLE_DIRS
     examples/runtime/core_echo
     examples/runtime/core_idle_echo
 )
+if(BUILD_WEB)
+    list(APPEND _EXAMPLE_DIRS
+        examples/web/hello_http
+    )
+endif()
 if(BUILD_EXAMPLES)
     foreach(_dir IN LISTS _EXAMPLE_DIRS)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt")
@@ -130,10 +182,28 @@ install(
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+if(BUILD_WEB)
+    install(
+        TARGETS RuntimeWeb llhttp_static
+        EXPORT ${IORUNTIME_WEB_PACKAGE_NAME}Targets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
+
 install(
-    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/core"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
 )
+
+if(BUILD_WEB)
+    install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/web"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
+    )
+endif()
 
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/iouring_runtimeConfig.cmake.in"
@@ -141,11 +211,27 @@ configure_package_config_file(
     INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_PACKAGE_NAME}"
 )
 
+if(BUILD_WEB)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/iouring_runtime_webConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_webConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_WEB_PACKAGE_NAME}"
+    )
+endif()
+
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtimeConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
     COMPATIBILITY SameMajorVersion
 )
+
+if(BUILD_WEB)
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_webConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+endif()
 
 install(
     EXPORT ${IORUNTIME_PACKAGE_NAME}Targets
@@ -154,9 +240,33 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_PACKAGE_NAME}"
 )
 
+if(BUILD_WEB)
+    install(
+        EXPORT ${IORUNTIME_WEB_PACKAGE_NAME}Targets
+        FILE "${IORUNTIME_WEB_PACKAGE_NAME}Targets.cmake"
+        NAMESPACE ${IORUNTIME_WEB_PACKAGE_NAME}::
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_WEB_PACKAGE_NAME}"
+    )
+endif()
+
 install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtimeConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtimeConfigVersion.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_PACKAGE_NAME}"
 )
+
+if(BUILD_WEB)
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_webConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_webConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_WEB_PACKAGE_NAME}"
+    )
+
+    install(
+        FILES
+            "${llhttp_SOURCE_DIR}/include/llhttp.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+endif()

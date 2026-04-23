@@ -21,3 +21,8 @@ Main public types:
 - `iouring_runtime::core::job::JobTimer`
 
 This repository does not export higher-level protocol or application layers.
+
+When `BUILD_WEB=ON`, an additional package is produced:
+
+- `iouring_runtime_web::RuntimeWeb`
+- public headers under `iouring_runtime/web/...`

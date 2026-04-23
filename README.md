@@ -9,6 +9,13 @@
 This repository intentionally does not include HTTP, WebSocket, storage, or
 game-server layers.
 
+An optional HTTP module can be built from the same source tree, but it is a
+separate package and target:
+
+- `iouring_runtime_web::RuntimeWeb`
+- public headers under `iouring_runtime/web/...`
+- enabled only with `-DBUILD_WEB=ON`
+
 ## Scope
 
 The runtime surface includes:
@@ -55,6 +62,14 @@ Install locally with:
 cmake --install build --prefix /tmp/iouring-runtime-install
 ```
 
+Optional web module install:
+
+```bash
+cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DBUILD_WEB=ON
+cmake --build build-web -j$(nproc)
+cmake --install build-web --prefix /tmp/iouring-runtime-install
+```
+
 ## Examples
 
 - `examples/runtime/core_echo/`
@@ -87,6 +102,8 @@ ctest --test-dir build-tests --output-on-failure
 - API reference: `docs/api-reference.md`
 - Runtime guide: `docs/runtime-guide.md`
 - Runtime architecture: `docs/runtime-architecture.md`
+- Web benchmarking: `docs/web-benchmarking.md`
+- Cross-machine benchmark guide: `docs/benchmarking-on-other-machines.md`
 - Runtime plan: `docs/plans/2026-04-22-io-uring-runtime-plan.md`
 - Contributing: `CONTRIBUTING.md`
 - Security: `SECURITY.md`

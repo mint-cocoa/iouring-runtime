@@ -1,0 +1,13 @@
+:8080 {
+    @health path /health
+    handle @health {
+        header Content-Type text/plain
+        respond "ok" 200
+    }
+
+    @root path /
+    handle @root {
+        header Content-Type text/plain
+        respond "hello from caddy" 200
+    }
+}

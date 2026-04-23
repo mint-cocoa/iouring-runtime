@@ -33,3 +33,7 @@ cmake --build build -j$(nproc)
 6. drive `Dispatch()` in a loop
 
 See `docs/runtime-guide.md` for a fuller explanation.
+
+If you want the optional HTTP layer, build with `-DBUILD_WEB=ON` and link
+`iouring_runtime_web::RuntimeWeb`. The runtime package remains usable on its
+own without web dependencies.
