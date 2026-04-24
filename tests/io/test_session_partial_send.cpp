@@ -137,3 +137,13 @@ TEST_F(PartialSendFixture, AdvanceBySumEmptiesBothVectors) {
     EXPECT_TRUE(first_weak.expired());
     EXPECT_TRUE(second_weak.expired());
 }
+
+TEST(SendBufferPoolTest, ReusesReleasedPartiallyFilledChunk) {
+    BufferPool pool(1024, 1);
+
+    auto first = MakeBuffer(pool, 100, std::byte{0xAA});
+    first.reset();
+
+    auto second = pool.Allocate(100);
+    ASSERT_TRUE(second.has_value());
+}

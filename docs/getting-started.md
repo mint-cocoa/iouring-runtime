@@ -37,3 +37,8 @@ See `docs/runtime-guide.md` for a fuller explanation.
 If you want the optional HTTP layer, build with `-DBUILD_WEB=ON` and link
 `iouring_runtime_web::RuntimeWeb`. The runtime package remains usable on its
 own without web dependencies.
+
+If you want the optional TCP proxy layer, build with `-DBUILD_PROXY=ON` and
+link `iouring_runtime_proxy::RuntimeProxy`. This module proxies raw TCP streams
+and can optionally terminate downstream TLS when certificate and key files are
+configured.

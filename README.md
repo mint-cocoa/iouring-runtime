@@ -16,6 +16,13 @@ separate package and target:
 - public headers under `iouring_runtime/web/...`
 - enabled only with `-DBUILD_WEB=ON`
 
+An optional TCP proxy module can also be built from the same source tree:
+
+- `iouring_runtime_proxy::RuntimeProxy`
+- public headers under `iouring_runtime/proxy/...`
+- enabled only with `-DBUILD_PROXY=ON`
+- can optionally terminate downstream TLS with OpenSSL
+
 ## Scope
 
 The runtime surface includes:
@@ -70,10 +77,20 @@ cmake --build build-web -j$(nproc)
 cmake --install build-web --prefix /tmp/iouring-runtime-install
 ```
 
+Optional proxy module install:
+
+```bash
+cmake -S . -B build-proxy -DCMAKE_BUILD_TYPE=Release -DBUILD_PROXY=ON
+cmake --build build-proxy -j$(nproc)
+cmake --install build-proxy --prefix /tmp/iouring-runtime-install
+```
+
 ## Examples
 
 - `examples/runtime/core_echo/`
 - `examples/runtime/core_idle_echo/`
+- `examples/proxy/tcp_reverse_proxy/`
+  deployment assets: `examples/proxy/tcp_reverse_proxy/deploy/`
 
 Build examples with:
 
@@ -101,6 +118,7 @@ ctest --test-dir build-tests --output-on-failure
 - Getting started: `docs/getting-started.md`
 - API reference: `docs/api-reference.md`
 - Runtime guide: `docs/runtime-guide.md`
+- Proxy guide: `docs/proxy-guide.md`
 - Runtime architecture: `docs/runtime-architecture.md`
 - Web benchmarking: `docs/web-benchmarking.md`
 - Cross-machine benchmark guide: `docs/benchmarking-on-other-machines.md`

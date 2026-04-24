@@ -14,6 +14,10 @@
 
 namespace iouring_runtime::core::io {
 
+namespace {
+constexpr std::size_t kMaxSendIovecs = 1024;
+}
+
 Session::Session(int fd, IoRing& ring, BufferPool& pool,
                  std::uint32_t send_queue_max_pending)
     : socket_(fd)
@@ -113,6 +117,31 @@ std::expected<void, io::IoError> Session::Send(buffer::SendBufferRef buf) {
     return {};
 }
 
+void Session::PauseRecv() {
+    if (disconnecting_ || recv_paused_) {
+        return;
+    }
+
+    recv_paused_ = true;
+    if (recv_armed_ && !recv_cancel_requested_) {
+        if (ring_.PrepCancel(recv_ev_)) {
+            recv_cancel_requested_ = true;
+            ring_.Submit();
+        }
+    }
+}
+
+void Session::ResumeRecv() {
+    if (!recv_paused_) {
+        return;
+    }
+
+    recv_paused_ = false;
+    if (!recv_armed_ && !recv_cancel_requested_ && !disconnecting_) {
+        RegisterRecv();
+    }
+}
+
 void Session::DisconnectAfterFlush() {
     if (disconnecting_) return;
 
@@ -156,10 +185,14 @@ void Session::OnRecv(ring::RecvEvent& ev,
                      std::int32_t res, std::uint32_t flags) {
     const bool more = (flags & IORING_CQE_F_MORE) != 0;
     const bool has_buffer = (flags & IORING_CQE_F_BUFFER) != 0;
+    const bool was_cancel_requested = recv_cancel_requested_;
 
     // No F_MORE means the kernel will send no more CQEs for this SQE.
-    if (!more)
+    if (!more) {
+        recv_armed_ = false;
+        recv_cancel_requested_ = false;
         --pending_io_;
+    }
 
     // Always return provided buffer to the ring, even during disconnect.
     // Failing to return leaks buffers from the provided buffer pool.
@@ -183,6 +216,13 @@ void Session::OnRecv(ring::RecvEvent& ev,
         return;
     }
 
+    if (was_cancel_requested && res == -ECANCELED) {
+        if (!recv_paused_) {
+            RegisterRecv();
+        }
+        return;
+    }
+
     // Normal error handling
     if (res == 0) {
         // Peer closed session
@@ -194,7 +234,9 @@ void Session::OnRecv(ring::RecvEvent& ev,
     if (res == -ENOBUFS) {
         // Buffer pool exhausted — multishot terminated, re-register
         spdlog::warn("Session[fd={}]: [WARN:ENOBUFS] provided buffer pool exhausted, re-registering", Fd());
-        RegisterRecv();
+        if (!recv_paused_) {
+            RegisterRecv();
+        }
         return;
     }
 
@@ -205,7 +247,7 @@ void Session::OnRecv(ring::RecvEvent& ev,
     }
 
     // Multishot ended normally (e.g. internal resource limit) — re-register
-    if (!more)
+    if (!more && !recv_paused_)
         RegisterRecv();
 }
 
@@ -261,7 +303,7 @@ void Session::OnSend(ring::SendEvent& ev, std::int32_t res) {
     send_iovecs_.clear();
 
     send_queue_.MarkSent();
-    auto pending = send_queue_.Drain();
+    auto pending = send_queue_.Drain(kMaxSendIovecs);
     if (!pending.empty()) {
         SendBatch(std::move(pending));
         return;
@@ -361,6 +403,7 @@ void Session::EndAppIo() {
 
 void Session::RegisterRecv() {
     if (disconnecting_) return;
+    if (recv_paused_ || recv_armed_) return;
     ++pending_io_;
     if (!ring_.PrepRecvMultishot(recv_ev_, Fd())) {
         --pending_io_;
@@ -368,13 +411,14 @@ void Session::RegisterRecv() {
         Disconnect();
         return;
     }
+    recv_armed_ = true;
     ring_.Submit();
 }
 
 void Session::RegisterSend() {
     if (disconnecting_) return;
 
-    auto bufs = send_queue_.Drain();
+    auto bufs = send_queue_.Drain(kMaxSendIovecs);
     if (bufs.empty()) return;
 
     SendBatch(std::move(bufs));

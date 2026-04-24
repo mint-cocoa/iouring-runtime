@@ -14,6 +14,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 set(IORUNTIME_PACKAGE_NAME iouring_runtime)
 set(IORUNTIME_WEB_PACKAGE_NAME iouring_runtime_web)
+set(IORUNTIME_PROXY_PACKAGE_NAME iouring_runtime_proxy)
 
 FetchContent_Declare(
     spdlog
@@ -28,6 +29,7 @@ pkg_check_modules(URING REQUIRED IMPORTED_TARGET liburing)
 find_package(Threads REQUIRED)
 
 option(BUILD_WEB "Build the optional HTTP web module" OFF)
+option(BUILD_PROXY "Build the optional TCP proxy module" OFF)
 
 if(BUILD_WEB)
     FetchContent_Declare(
@@ -141,6 +143,38 @@ if(BUILD_WEB)
     target_compile_options(RuntimeWeb PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+if(BUILD_PROXY)
+    find_package(OpenSSL REQUIRED)
+
+    add_library(RuntimeProxy STATIC
+        src/proxy/AcmeChallengeSession.cpp
+        src/proxy/DownstreamTlsContext.cpp
+        src/proxy/ProxyCommon.cpp
+        src/proxy/ProxyConnector.cpp
+        src/proxy/ProxySessions.cpp
+        src/proxy/TcpProxyServer.cpp
+    )
+
+    add_library(${IORUNTIME_PROXY_PACKAGE_NAME}::RuntimeProxy ALIAS RuntimeProxy)
+
+    target_include_directories(RuntimeProxy
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+        PRIVATE
+            ${spdlog_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(RuntimeProxy
+        PUBLIC
+            Runtime
+            OpenSSL::SSL
+            OpenSSL::Crypto
+    )
+
+    target_compile_options(RuntimeProxy PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 option(BUILD_EXAMPLES "Build runtime examples" ON)
 set(_EXAMPLE_DIRS
     examples/runtime/core_echo
@@ -149,6 +183,11 @@ set(_EXAMPLE_DIRS
 if(BUILD_WEB)
     list(APPEND _EXAMPLE_DIRS
         examples/web/hello_http
+    )
+endif()
+if(BUILD_PROXY)
+    list(APPEND _EXAMPLE_DIRS
+        examples/proxy/tcp_reverse_proxy
     )
 endif()
 if(BUILD_EXAMPLES)
@@ -193,6 +232,17 @@ if(BUILD_WEB)
     )
 endif()
 
+if(BUILD_PROXY)
+    install(
+        TARGETS RuntimeProxy
+        EXPORT ${IORUNTIME_PROXY_PACKAGE_NAME}Targets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
+
 install(
     DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/core"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
@@ -201,6 +251,13 @@ install(
 if(BUILD_WEB)
     install(
         DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/web"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
+    )
+endif()
+
+if(BUILD_PROXY)
+    install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/proxy"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
     )
 endif()
@@ -219,6 +276,14 @@ if(BUILD_WEB)
     )
 endif()
 
+if(BUILD_PROXY)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/iouring_runtime_proxyConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_proxyConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_PROXY_PACKAGE_NAME}"
+    )
+endif()
+
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtimeConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
@@ -228,6 +293,14 @@ write_basic_package_version_file(
 if(BUILD_WEB)
     write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_webConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+endif()
+
+if(BUILD_PROXY)
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_proxyConfigVersion.cmake"
         VERSION "${PROJECT_VERSION}"
         COMPATIBILITY SameMajorVersion
     )
@@ -246,6 +319,15 @@ if(BUILD_WEB)
         FILE "${IORUNTIME_WEB_PACKAGE_NAME}Targets.cmake"
         NAMESPACE ${IORUNTIME_WEB_PACKAGE_NAME}::
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_WEB_PACKAGE_NAME}"
+    )
+endif()
+
+if(BUILD_PROXY)
+    install(
+        EXPORT ${IORUNTIME_PROXY_PACKAGE_NAME}Targets
+        FILE "${IORUNTIME_PROXY_PACKAGE_NAME}Targets.cmake"
+        NAMESPACE ${IORUNTIME_PROXY_PACKAGE_NAME}::
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_PROXY_PACKAGE_NAME}"
     )
 endif()
 
@@ -268,5 +350,14 @@ if(BUILD_WEB)
         FILES
             "${llhttp_SOURCE_DIR}/include/llhttp.h"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+endif()
+
+if(BUILD_PROXY)
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_proxyConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_proxyConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_PROXY_PACKAGE_NAME}"
     )
 endif()

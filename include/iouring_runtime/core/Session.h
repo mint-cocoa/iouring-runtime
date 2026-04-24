@@ -45,6 +45,8 @@ public:
 
     void Start();
     std::expected<void, io::IoError> Send(buffer::SendBufferRef buf);
+    void PauseRecv();
+    void ResumeRecv();
     void Disconnect();
     void DisconnectAfterFlush();
     void ReleaseOwnership();
@@ -151,6 +153,9 @@ private:
     BackpressureCallback on_backpressure_;
     bool disconnecting_ = false;
     bool disconnect_after_flush_ = false;
+    bool recv_armed_ = false;
+    bool recv_paused_ = false;
+    bool recv_cancel_requested_ = false;
     bool backpressure_active_ = false;
     std::size_t backpressure_high_watermark_ = 0;
     std::size_t backpressure_low_watermark_ = 0;

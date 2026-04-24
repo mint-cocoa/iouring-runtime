@@ -177,8 +177,7 @@ private:
 // Deferred definition
 inline void SendBufferChunk::OnRelease() {
     if (ref_count_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        if (Full())
-            pool_->OnChunkUnused(this);
+        pool_->OnChunkUnused(this);
     }
 }
 

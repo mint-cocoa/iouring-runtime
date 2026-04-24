@@ -148,6 +148,29 @@ TEST_F(SessionLifecycleTest, NormalDisconnect) {
     EXPECT_EQ(sess.use_count(), 1);
 }
 
+TEST_F(SessionLifecycleTest, PauseRecvBeforeStartDefersReadsUntilResume) {
+    auto [local_fd, remote_fd] = MakeSocketPair();
+
+    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
+    sess->PauseRecv();
+    sess->Start();
+
+    ASSERT_EQ(::write(remote_fd, "paused", 6), 6);
+    DispatchUntil(*ring_, [&] {
+        return sess->recv_count.load(std::memory_order_relaxed) != 0;
+    }, std::chrono::milliseconds{100});
+    EXPECT_EQ(sess->recv_count.load(std::memory_order_relaxed), 0);
+
+    sess->ResumeRecv();
+    DispatchUntil(*ring_, [&] {
+        return sess->recv_bytes.load(std::memory_order_relaxed) == 6;
+    });
+    EXPECT_EQ(sess->recv_bytes.load(std::memory_order_relaxed), 6);
+
+    ::close(remote_fd);
+    DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
+}
+
 // Send data, then peer closes. Both send CQE and recv EOF must settle
 // before release.
 TEST_F(SessionLifecycleTest, SendThenPeerClose) {

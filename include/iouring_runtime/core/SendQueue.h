@@ -2,8 +2,10 @@
 
 #include <iouring_runtime/core/SendBuffer.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
+#include <iterator>
 #include <mutex>
 #include <vector>
 
@@ -46,11 +48,20 @@ public:
         return {first, false, pending_.size()};
     }
 
-    // Drain all pending buffers (called from IO thread after send completes).
-    std::vector<SendBufferRef> Drain() {
+    // Drain pending buffers (called from IO thread after send completes).
+    // max_count == 0 drains all buffers.
+    std::vector<SendBufferRef> Drain(std::size_t max_count = 0) {
         std::lock_guard lk(mutex_);
         std::vector<SendBufferRef> out;
-        out.swap(pending_);
+        if (max_count == 0 || max_count >= pending_.size()) {
+            out.swap(pending_);
+            return out;
+        }
+
+        out.reserve(max_count);
+        auto split = pending_.begin() + static_cast<std::ptrdiff_t>(max_count);
+        std::move(pending_.begin(), split, std::back_inserter(out));
+        pending_.erase(pending_.begin(), split);
         return out;
     }
 

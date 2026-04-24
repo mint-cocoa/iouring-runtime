@@ -1,0 +1,39 @@
+[Unit]
+Description=io_uring Runtime TCP Reverse Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tcp-proxy
+Group=tcp-proxy
+EnvironmentFile=/etc/iouring-runtime/tcp_reverse_proxy.env
+ExecStart=/usr/local/bin/tcp_reverse_proxy
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=1
+
+# Allow binding to 80/443 and reading the root-owned Let's Encrypt tree
+# without running the proxy as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH
+NoNewPrivileges=true
+
+LimitNOFILE=1048576
+WorkingDirectory=/var/lib/iouring-runtime
+StateDirectory=iouring-runtime
+RuntimeDirectory=iouring-runtime
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+ReadOnlyPaths=/var/lib/letsencrypt /etc/letsencrypt
+
+[Install]
+WantedBy=multi-user.target
