@@ -212,6 +212,7 @@ set(_EXAMPLE_DIRS
 if(BUILD_WEB)
     list(APPEND _EXAMPLE_DIRS
         examples/web/file_store_server
+        examples/web/dropapp
         examples/web/hello_http
         examples/web/speedtest_server
         examples/web/status_server

@@ -89,6 +89,7 @@ cmake --install build-proxy --prefix /tmp/iouring-runtime-install
 
 - `examples/runtime/core_echo/`
 - `examples/runtime/core_idle_echo/`
+- `examples/web/dropapp/`
 - `examples/proxy/tcp_reverse_proxy/`
   deployment assets: `examples/proxy/tcp_reverse_proxy/deploy/`
 
@@ -101,6 +102,22 @@ cmake -S . -B build-examples \
   -DBUILD_TESTS=OFF
 cmake --build build-examples --target core_echo core_idle_echo -j$(nproc)
 ```
+
+Build and run the `dropapp` web example:
+
+```bash
+cmake -S . -B build-dropapp \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_WEB=ON \
+  -DBUILD_EXAMPLES=ON \
+  -DBUILD_TESTS=OFF
+cmake --build build-dropapp --target dropapp -j$(nproc)
+DROPAPP_ROOT=/tmp/dropapp DROPAPP_PORT=3000 ./build-dropapp/bin/dropapp
+```
+
+The root `Dockerfile` builds the `dropapp` image. On `main`, the
+`dropapp image` workflow pushes `ghcr.io/mint-cocoa/dropapp:${GITHUB_SHA}` and
+updates `apps/dropapp/values.yaml` in `mint-cocoa/home-k8s-gitops`.
 
 ## Tests
 

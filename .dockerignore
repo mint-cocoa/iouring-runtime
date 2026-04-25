@@ -1,0 +1,13 @@
+.git
+.github
+build
+build-*
+benchmark-results
+deploy
+docs
+*.md
+!.dockerignore
+!README.md
+.DS_Store
+__pycache__
+*.pyc

@@ -38,6 +38,7 @@ jobs:
           cmake -S . -B build
           -G Ninja
           -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_WEB=ON
           -DBUILD_TESTS=ON
           -DBUILD_EXAMPLES=ON
 
