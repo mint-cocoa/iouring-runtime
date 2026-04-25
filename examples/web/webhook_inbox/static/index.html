@@ -1,33 +1,87 @@
-<!doctype html><html><head><meta charset="utf-8">
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>webhook inbox</title>
 <style>
-:root{color-scheme:dark;--bg:#101319;--panel:#171d26;--line:#2b3544;--text:#edf2f7;--muted:#9ba8b8;--accent:#2f81f7;--bad:#da3633}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,Segoe UI,sans-serif}
-main{max-width:1180px;margin:0 auto;padding:24px 16px 40px}header{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:16px}
-h1{font-size:28px;margin:0;letter-spacing:0}.muted{color:var(--muted)}.toolbar{display:grid;grid-template-columns:180px 1fr 210px auto;gap:10px;margin-bottom:14px}
-input,textarea{min-width:0;background:#0d1117;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:9px}
-button{border:0;border-radius:6px;padding:9px 13px;color:white;background:var(--accent);cursor:pointer;white-space:nowrap}.danger{background:var(--bad)}.copy{background:#46586d}
-.grid{display:grid;grid-template-columns:minmax(340px,420px) 1fr;gap:14px}.panel{border:1px solid var(--line);background:var(--panel);border-radius:8px;overflow:hidden}.panel h2{font-size:13px;text-transform:uppercase;color:var(--muted);margin:0;padding:10px 12px;border-bottom:1px solid var(--line)}
-table{width:100%;border-collapse:collapse}td,th{text-align:left;border-bottom:1px solid var(--line);padding:9px 10px;vertical-align:middle}th{font-size:12px;color:var(--muted);font-weight:600}.event{cursor:pointer}.event:hover{background:#202938}.selected{background:#263244}
-.method{font-weight:700}.right{text-align:right}.body{white-space:pre-wrap;word-break:break-word;background:#0d1117;margin:0;padding:12px;min-height:260px}.headers{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#c9d1d9}
-@media(max-width:860px){header{display:block}.toolbar{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.hide-sm{display:none}}
-</style></head><body><main>
-<header><div><h1>webhook inbox</h1><div class="muted">Capture HTTP webhooks and inspect their payloads.</div></div><div id="summary" class="muted"></div></header>
-<div class="toolbar"><input id="inbox" value="default" placeholder="inbox"><input id="endpoint" readonly><input id="token" type="password" placeholder="read token"><button id="copy" class="copy">Copy URL</button></div>
-<div class="grid">
-<section class="panel"><h2>Events</h2><table><thead><tr><th>Method</th><th>Inbox</th><th class="right">Size</th></tr></thead><tbody id="rows"></tbody></table></section>
-<section class="panel"><h2>Detail</h2><div id="detail" class="body muted">Select an event.</div></section>
+:root{color-scheme:light;--bg:#f4f6f8;--surface:#ffffff;--ink:#1f2933;--muted:#687383;--line:#d8dee6;--line2:#e9edf2;--accent:#0f766e;--accent2:#b45309;--danger:#b42318;--code:#101828;--code2:#182230}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,-apple-system,Segoe UI,sans-serif}
+button,input{font:inherit}button{border:1px solid transparent;border-radius:6px;padding:8px 11px;color:white;background:var(--accent);cursor:pointer;white-space:nowrap}
+button:hover{filter:brightness(.96)}button:disabled{background:#9aa4b2;cursor:not-allowed}.secondary{background:#fff;color:var(--ink);border-color:var(--line)}.danger{background:var(--danger)}
+input{min-width:0;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);padding:8px 10px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.muted{color:var(--muted)}
+.app{min-height:100vh;display:grid;grid-template-rows:auto 1fr}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;background:#15202b;color:white;border-bottom:3px solid var(--accent)}
+.brand{display:flex;align-items:center;gap:12px}.mark{width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,#14b8a6,#f59e0b);box-shadow:inset 0 0 0 1px rgba(255,255,255,.35)}
+h1{font-size:18px;line-height:1.2;margin:0;letter-spacing:0}.subtitle{font-size:12px;color:#c9d2dc;margin-top:2px}.status{font-size:13px;color:#d5dde7}
+.workspace{display:grid;grid-template-columns:292px minmax(360px,520px) minmax(0,1fr);gap:1px;background:var(--line);border-top:1px solid var(--line)}
+.side,.stream,.inspect{min-width:0;background:var(--surface);min-height:calc(100vh - 64px)}
+.side{padding:16px;display:flex;flex-direction:column;gap:18px}.block{display:grid;gap:9px}.label{font-size:12px;font-weight:700;color:#465160;text-transform:uppercase}
+.endpoint{display:grid;grid-template-columns:1fr auto;gap:8px}.endpoint input{background:#f8fafc}.hint{font-size:12px;line-height:1.45;color:var(--muted)}
+.sample{margin:0;border-radius:6px;background:var(--code);color:#d0d5dd;padding:12px;overflow:auto;font-size:12px;line-height:1.5}
+.stream{display:grid;grid-template-rows:auto 1fr}.stream-head,.inspect-head{padding:14px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:12px}
+h2{font-size:13px;margin:0;text-transform:uppercase;color:#465160}.event-list{overflow:auto}.event{display:grid;grid-template-columns:74px 1fr auto;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line2);cursor:pointer}
+.event:hover{background:#f8fafc}.event.selected{background:#e8f5f3;border-left:4px solid var(--accent);padding-left:10px}.method{font-weight:800;color:var(--accent2)}.path{font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.meta{font-size:12px;color:var(--muted);margin-top:3px}.size{text-align:right;color:#465160;font-size:12px}
+.empty{padding:20px;color:var(--muted)}.inspect{display:grid;grid-template-rows:auto auto 1fr}.summary{padding:16px;border-bottom:1px solid var(--line2);display:grid;gap:8px}
+.summary-main{display:flex;align-items:center;gap:10px;min-width:0}.pill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;background:#ecfdf3;color:#067647;font-size:12px;font-weight:700}.url{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabs{display:flex;gap:1px;background:var(--line2);border-bottom:1px solid var(--line2)}.tab{border:0;border-radius:0;background:#fff;color:#465160;padding:10px 14px}.tab.active{background:var(--code2);color:white}
+.payload{min-height:0;overflow:auto;background:var(--code2);color:#e4e7ec}.payload pre{margin:0;padding:16px;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.delete-row{padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);background:var(--code2)}.hide{display:none}
+@media(max-width:1050px){.workspace{grid-template-columns:280px 1fr}.inspect{grid-column:1/-1;min-height:420px}.side,.stream{min-height:520px}}
+@media(max-width:720px){.topbar{display:block}.status{margin-top:8px}.workspace{grid-template-columns:1fr}.side,.stream,.inspect{min-height:auto}.event{grid-template-columns:64px 1fr}.size{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="mark"></div><div><h1>webhook inbox</h1><div class="subtitle">Live HTTP event capture and payload inspection</div></div></div>
+    <div id="summary" class="status">waiting for events</div>
+  </header>
+  <main class="workspace">
+    <aside class="side">
+      <div class="block">
+        <div class="label">Inbox</div>
+        <input id="inbox" value="default" placeholder="default">
+        <div class="hint">Use one inbox name per integration or test run.</div>
+      </div>
+      <div class="block">
+        <div class="label">Capture URL</div>
+        <div class="endpoint"><input id="endpoint" class="mono" readonly><button id="copy">Copy</button></div>
+      </div>
+      <div class="block">
+        <div class="label">Read Token</div>
+        <input id="token" type="password" placeholder="optional API token">
+      </div>
+      <div class="block">
+        <div class="label">Example</div>
+        <pre id="sample" class="sample"></pre>
+      </div>
+    </aside>
+    <section class="stream">
+      <div class="stream-head"><h2>Event Stream</h2><button id="refresh" class="secondary">Refresh</button></div>
+      <div id="rows" class="event-list"></div>
+    </section>
+    <section class="inspect">
+      <div class="inspect-head"><h2>Inspector</h2><button id="delete" class="danger hide">Delete</button></div>
+      <div id="eventSummary" class="summary"><div class="muted">Select an event to inspect headers and body.</div></div>
+      <div class="tabs"><button id="bodyTab" class="tab active">Body</button><button id="headersTab" class="tab">Headers</button></div>
+      <div class="payload"><pre id="payload">No event selected.</pre></div>
+    </section>
+  </main>
 </div>
 <script>
-const inbox=document.getElementById('inbox'), endpoint=document.getElementById('endpoint'), token=document.getElementById('token'), copy=document.getElementById('copy'), rows=document.getElementById('rows'), detail=document.getElementById('detail'), summary=document.getElementById('summary');
-let selected='';
+const inbox=document.getElementById('inbox'),endpoint=document.getElementById('endpoint'),token=document.getElementById('token'),copy=document.getElementById('copy'),rows=document.getElementById('rows'),summary=document.getElementById('summary'),sample=document.getElementById('sample'),refreshButton=document.getElementById('refresh'),payload=document.getElementById('payload'),eventSummary=document.getElementById('eventSummary'),deleteButton=document.getElementById('delete'),bodyTab=document.getElementById('bodyTab'),headersTab=document.getElementById('headersTab');
+let selected='',currentBody='',currentHeaders='';
 function auth(){return token.value?{'Authorization':'Bearer '+token.value}:{}}
 function size(n){const u=['B','KiB','MiB','GiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]}
 function safeInbox(){return (inbox.value||'default').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'')||'default'}
-function syncEndpoint(){endpoint.value=location.origin+'/hook/'+safeInbox()}
-async function refresh(){syncEndpoint();const r=await fetch('/api/events?inbox='+encodeURIComponent(safeInbox()),{headers:auth()});if(r.status===401){rows.innerHTML='<tr><td colspan="3" class="muted">Token required.</td></tr>';return}const events=await r.json();summary.textContent=events.length+' event'+(events.length===1?'':'s');rows.innerHTML='';for(const e of events){const tr=document.createElement('tr');tr.className='event'+(e.id===selected?' selected':'');tr.innerHTML=`<td><span class="method">${e.method}</span><div class="muted">${new Date(e.received_at*1000).toLocaleString()}</div></td><td>${e.inbox}<div class="muted hide-sm">${e.content_type||'no content type'}</div></td><td class="right">${size(e.size)}</td>`;tr.onclick=()=>load(e.id);rows.appendChild(tr)}if(!events.length){rows.innerHTML='<tr><td colspan="3" class="muted">No events yet.</td></tr>'}}
-async function load(id){selected=id;const r=await fetch('/api/events/'+encodeURIComponent(id),{headers:auth()});if(!r.ok){detail.textContent=await r.text();return}const data=await r.json(), e=data.event;const headers=e.headers.map(h=>h.name+': '+h.value).join('\n');detail.innerHTML=`<div><b>${e.method}</b> /hook/${e.inbox}${e.path==='/'?'':e.path}</div><div class="muted">${new Date(e.received_at*1000).toLocaleString()} | ${size(e.size)} | ${e.remote_addr}</div><hr><div class="headers"></div><hr><pre class="body"></pre><div style="padding:12px"><button class="danger">Delete</button></div>`;detail.querySelector('.headers').textContent=headers;detail.querySelector('pre').textContent=data.body;detail.querySelector('button').onclick=async()=>{await fetch('/api/events/'+encodeURIComponent(id),{method:'DELETE',headers:auth()});selected='';detail.className='body muted';detail.textContent='Select an event.';refresh()};refresh()}
+function syncEndpoint(){const url=location.origin+'/hook/'+safeInbox();endpoint.value=url;sample.textContent=`curl -X POST ${url} \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"event\":\"ping\"}'`}
+function showTab(which){bodyTab.classList.toggle('active',which==='body');headersTab.classList.toggle('active',which==='headers');payload.textContent=which==='body'?currentBody:currentHeaders}
+async function refresh(){syncEndpoint();const r=await fetch('/api/events?inbox='+encodeURIComponent(safeInbox()),{headers:auth()});if(r.status===401){rows.innerHTML='<div class="empty">Token required for event listing.</div>';summary.textContent='token required';return}if(!r.ok){rows.innerHTML='<div class="empty">'+await r.text()+'</div>';return}const events=await r.json();summary.textContent=events.length+' captured event'+(events.length===1?'':'s');rows.innerHTML='';for(const e of events){const div=document.createElement('div');div.className='event'+(e.id===selected?' selected':'');const path='/hook/'+e.inbox+(e.path==='/'?'':e.path);div.innerHTML=`<div class="method"></div><div><div class="path"></div><div class="meta"></div></div><div class="size"></div>`;div.querySelector('.method').textContent=e.method;div.querySelector('.path').textContent=path;div.querySelector('.meta').textContent=(e.content_type||'no content type')+' | '+new Date(e.received_at*1000).toLocaleTimeString();div.querySelector('.size').textContent=size(e.size);div.onclick=()=>load(e.id);rows.appendChild(div)}if(!events.length){rows.innerHTML='<div class="empty">No events in this inbox yet.</div>'}}
+async function load(id){selected=id;const r=await fetch('/api/events/'+encodeURIComponent(id),{headers:auth()});if(!r.ok){payload.textContent=await r.text();return}const data=await r.json(),e=data.event,path='/hook/'+e.inbox+(e.path==='/'?'':e.path);currentHeaders=e.headers.map(h=>h.name+': '+h.value).join('\n')||'No captured headers.';currentBody=data.body||'';eventSummary.innerHTML='<div class="summary-main"><span class="pill"></span><div class="url"></div></div><div class="muted"></div>';eventSummary.querySelector('.pill').textContent=e.method;eventSummary.querySelector('.url').textContent=path;eventSummary.querySelector('.muted').textContent=new Date(e.received_at*1000).toLocaleString()+' | '+size(e.size)+' | '+e.remote_addr;deleteButton.classList.remove('hide');showTab('body');refresh()}
 copy.onclick=async()=>{syncEndpoint();await navigator.clipboard.writeText(endpoint.value)}
-inbox.oninput=refresh;token.oninput=refresh;syncEndpoint();refresh();setInterval(refresh,5000);
-</script></main></body></html>
+deleteButton.onclick=async()=>{if(!selected)return;await fetch('/api/events/'+encodeURIComponent(selected),{method:'DELETE',headers:auth()});selected='';currentBody='';currentHeaders='';deleteButton.classList.add('hide');eventSummary.innerHTML='<div class="muted">Select an event to inspect headers and body.</div>';payload.textContent='No event selected.';refresh()}
+bodyTab.onclick=()=>showTab('body');headersTab.onclick=()=>showTab('headers');refreshButton.onclick=refresh;inbox.oninput=refresh;token.oninput=refresh;syncEndpoint();refresh();setInterval(refresh,5000);
+</script>
+</body>
+</html>
