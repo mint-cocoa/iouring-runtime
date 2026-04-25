@@ -112,7 +112,9 @@ cmake -S . -B build-dropapp \
   -DBUILD_EXAMPLES=ON \
   -DBUILD_TESTS=OFF
 cmake --build build-dropapp --target dropapp -j$(nproc)
-DROPAPP_ROOT=/tmp/dropapp DROPAPP_PORT=3000 ./build-dropapp/bin/dropapp
+DROPAPP_ROOT=/tmp/dropapp DROPAPP_PORT=3000 \
+  DROPAPP_STATIC_ROOT=examples/web/dropapp/static \
+  ./build-dropapp/bin/dropapp
 ```
 
 The root `Dockerfile` builds the `dropapp` image. On `main`, the

@@ -15,12 +15,18 @@ Uploads and deletes require `Authorization: Bearer <token>` when
 `DROPAPP_AUTH_TOKEN` is set. Download links are public to anyone who knows the
 URL.
 
+The browser UI is served from `DROPAPP_STATIC_ROOT/index.html`. If the variable
+is not set, `dropapp` first tries `/usr/share/dropapp/static`, then the source
+tree path `examples/web/dropapp/static`.
+
 For local testing:
 
 ```bash
 cmake -S . -B build-dropapp -DBUILD_WEB=ON -DBUILD_EXAMPLES=ON -DBUILD_TESTS=ON
 cmake --build build-dropapp --target dropapp
-DROPAPP_ROOT=/tmp/dropapp DROPAPP_PORT=3000 ./build-dropapp/bin/dropapp
+DROPAPP_ROOT=/tmp/dropapp DROPAPP_PORT=3000 \
+  DROPAPP_STATIC_ROOT=examples/web/dropapp/static \
+  ./build-dropapp/bin/dropapp
 ```
 
 Then open `http://127.0.0.1:3000/`.

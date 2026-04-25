@@ -34,10 +34,12 @@ RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nolog
     && chown -R dropapp:dropapp /data
 
 COPY --from=build /src/build/bin/dropapp /usr/local/bin/dropapp
+COPY --from=build /src/examples/web/dropapp/static /usr/share/dropapp/static
 
 USER dropapp
 ENV DROPAPP_HOST=0.0.0.0 \
     DROPAPP_PORT=3000 \
-    DROPAPP_ROOT=/data
+    DROPAPP_ROOT=/data \
+    DROPAPP_STATIC_ROOT=/usr/share/dropapp/static
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/dropapp"]

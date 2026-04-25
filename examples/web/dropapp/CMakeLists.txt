@@ -10,3 +10,6 @@ target_link_libraries(dropapp PRIVATE
 
 target_compile_features(dropapp PRIVATE cxx_std_23)
 target_compile_options(dropapp PRIVATE -Wall -Wextra -Wpedantic)
+
+install(TARGETS dropapp RUNTIME DESTINATION bin)
+install(DIRECTORY static/ DESTINATION share/dropapp/static)

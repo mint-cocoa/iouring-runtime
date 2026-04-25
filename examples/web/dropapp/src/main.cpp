@@ -355,6 +355,8 @@ std::string MetaJsonForApi(const DropFile& file) {
 std::string MimeType(const std::string& filename) {
     const auto ext = std::filesystem::path(filename).extension().string();
     if (ext == ".html" || ext == ".htm") return "text/html; charset=utf-8";
+    if (ext == ".css") return "text/css; charset=utf-8";
+    if (ext == ".js") return "application/javascript; charset=utf-8";
     if (ext == ".txt" || ext == ".log" || ext == ".md") return "text/plain; charset=utf-8";
     if (ext == ".json") return "application/json";
     if (ext == ".png") return "image/png";
@@ -775,39 +777,66 @@ void SendText(RequestContext& ctx, HttpStatus status, std::string body) {
         .Send();
 }
 
-std::string Html() {
-    return R"HTML(<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>dropapp</title>
-<style>
-:root{color-scheme:dark;--bg:#111318;--panel:#1a1f27;--line:#303744;--text:#eef2f7;--muted:#98a3b3;--accent:#2f81f7;--ok:#238636;--bad:#da3633}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,Segoe UI,sans-serif}
-main{max-width:1040px;margin:0 auto;padding:28px 18px 42px}header{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:18px}
-h1{font-size:28px;margin:0;letter-spacing:0}.muted{color:var(--muted)}.toolbar{display:grid;grid-template-columns:1fr 220px auto;gap:10px;margin-bottom:14px}
-input{min-width:0;background:#0d1117;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:9px}
-input[type=file]{padding:7px}button{border:0;border-radius:6px;padding:9px 13px;color:white;background:var(--accent);cursor:pointer;white-space:nowrap}
-button:hover{filter:brightness(1.08)}button:disabled{background:#394150;color:#9aa4af;cursor:not-allowed}.danger{background:var(--bad)}.copy{background:#45556a}.upload{background:var(--ok)}
-.progress{display:none;margin:4px 0 18px}.meter{height:10px;background:#252b33;border-radius:999px;overflow:hidden}.fill{height:100%;width:0;background:var(--accent);transition:width .12s linear}
-.status{display:flex;justify-content:space-between;gap:12px;margin-top:8px;color:var(--muted);font-size:13px}
-table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
-th,td{text-align:left;border-bottom:1px solid var(--line);padding:10px 12px;vertical-align:middle}th{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase}
-tr:last-child td{border-bottom:0}.right{text-align:right}.actions{display:flex;justify-content:flex-end;gap:8px}.name{max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-a{color:#79c0ff;text-decoration:none}@media(max-width:760px){header{display:block}.toolbar{grid-template-columns:1fr}.hide-sm{display:none}.actions{justify-content:flex-start}.right{text-align:left}}
-</style></head><body><main>
-<header><div><h1>dropapp</h1><div class="muted">Temporary file drops expire automatically.</div></div><div id="summary" class="muted"></div></header>
-<div class="toolbar"><input id="file" type="file"><input id="token" type="password" placeholder="write token"><button id="upload" class="upload">Upload</button></div>
-<div id="progress" class="progress"><div class="meter"><div id="fill" class="fill"></div></div><div class="status"><span id="state">Idle</span><span id="detail"></span></div></div>
-<table><thead><tr><th>Name</th><th class="right">Size</th><th class="hide-sm">Expires</th><th></th></tr></thead><tbody id="rows"></tbody></table>
-<script>
-const rows=document.getElementById('rows'), token=document.getElementById('token'), file=document.getElementById('file'), upload=document.getElementById('upload'), progress=document.getElementById('progress'), fill=document.getElementById('fill'), state=document.getElementById('state'), detail=document.getElementById('detail'), summary=document.getElementById('summary');
-function auth(){return token.value?{'Authorization':'Bearer '+token.value}:{}}
-function size(n){const u=['B','KiB','MiB','GiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]}
-function setProgress(p,label,extra){progress.style.display='block';fill.style.width=Math.max(0,Math.min(100,p))+'%';state.textContent=label;detail.textContent=extra||''}
-async function refresh(){const r=await fetch('/api/files');const files=await r.json();rows.innerHTML='';summary.textContent=files.length+' active file'+(files.length===1?'':'s');for(const f of files){const tr=document.createElement('tr');const expires=new Date(f.expires_at*1000);tr.innerHTML=`<td class="name"><a href="${f.url}">${f.filename}</a></td><td class="right">${size(f.size)}</td><td class="muted hide-sm">${expires.toLocaleString()}</td><td><div class="actions"><button class="copy">Copy</button><button class="danger">Delete</button></div></td>`;tr.querySelector('.copy').onclick=async()=>{await navigator.clipboard.writeText(location.origin+f.url)};tr.querySelector('.danger').onclick=async()=>{await fetch('/api/files/'+encodeURIComponent(f.id),{method:'DELETE',headers:auth()});refresh()};rows.appendChild(tr)}if(!files.length){rows.innerHTML='<tr><td colspan="4" class="muted">No active files.</td></tr>'}}
-function uploadFile(f){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();const started=performance.now();xhr.open('POST','/api/files');xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.setRequestHeader('X-Dropapp-Filename-Encoded',encodeURIComponent(f.name));for(const [k,v] of Object.entries(auth()))xhr.setRequestHeader(k,v);xhr.upload.onprogress=e=>{const sent=e.loaded||0,total=e.lengthComputable?e.total:f.size;const pct=total?sent*100/total:0;const seconds=Math.max((performance.now()-started)/1000,.001);setProgress(pct,'Uploading '+pct.toFixed(1)+'%',`${size(sent)} / ${size(total)} | ${size(sent/seconds)}/s`)};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300){const meta=JSON.parse(xhr.responseText);setProgress(100,'Complete',meta.filename);resolve(meta)}else{reject(new Error(xhr.responseText||('HTTP '+xhr.status)))}};xhr.onerror=()=>reject(new Error('Network error'));xhr.onabort=()=>reject(new Error('Upload aborted'));xhr.send(f)})}
-upload.onclick=async()=>{const f=file.files[0];if(!f)return;upload.disabled=true;setProgress(0,'Starting',f.name);try{await uploadFile(f);file.value='';await refresh()}catch(e){setProgress(0,'Failed',e.message)}finally{upload.disabled=false}};
-refresh();setInterval(refresh,30000);
-</script></main></body></html>)HTML";
+std::filesystem::path DefaultStaticRoot() {
+    const std::filesystem::path packaged = "/usr/share/dropapp/static";
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(packaged / "index.html", ec)) {
+        return packaged;
+    }
+    return std::filesystem::path("examples/web/dropapp/static");
+}
+
+std::optional<std::filesystem::path> SafeStaticPath(std::string_view raw_path) {
+    auto decoded = UrlDecode(raw_path);
+    if (!decoded) {
+        return std::nullopt;
+    }
+    std::replace(decoded->begin(), decoded->end(), '\\', '/');
+    while (!decoded->empty() && decoded->front() == '/') {
+        decoded->erase(decoded->begin());
+    }
+    if (decoded->empty()) {
+        *decoded = "index.html";
+    }
+
+    std::filesystem::path relative;
+    for (const auto& part : std::filesystem::path(*decoded)) {
+        const auto value = part.string();
+        if (value.empty() || value == ".") {
+            continue;
+        }
+        if (value == "..") {
+            return std::nullopt;
+        }
+        relative /= part;
+    }
+    if (relative.empty()) {
+        relative = "index.html";
+    }
+    return relative;
+}
+
+void ServeStaticFile(RequestContext& ctx,
+                     const std::filesystem::path& root,
+                     std::string_view relative_path) {
+    const auto safe_path = SafeStaticPath(relative_path);
+    if (!safe_path) {
+        SendText(ctx, HttpStatus::kNotFound, "Not Found");
+        return;
+    }
+
+    const auto path = root / *safe_path;
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec)) {
+        SendText(ctx, HttpStatus::kNotFound, "Not Found");
+        return;
+    }
+
+    auto body = ReadFile(path.string());
+    ctx.response.ContentType(MimeType(path.filename().string()))
+        .Header("Cache-Control", "no-cache")
+        .Body(std::move(body))
+        .Send();
 }
 
 void ListFiles(RequestContext& ctx, DropStore& store) {
@@ -904,6 +933,9 @@ int main() {
     const auto send_chunk_bytes =
         ReadUnsignedEnv<std::uint32_t>("DROPAPP_SEND_CHUNK_BYTES",
                                        kDefaultSendChunkBytes);
+    const auto static_root =
+        std::filesystem::path(ReadStringEnv("DROPAPP_STATIC_ROOT",
+                                            DefaultStaticRoot().string()));
 
     DropStore store(std::filesystem::path(ReadStringEnv("DROPAPP_ROOT", "/data")));
     if (!store.Init()) {
@@ -973,8 +1005,11 @@ int main() {
     iouring_runtime::web::WebServer server(config);
     iouring_runtime::web::WebServer::InstallStopSignalHandlers();
 
-    server.Get("/", [](RequestContext& ctx) {
-        ctx.response.ContentType("text/html; charset=utf-8").Body(Html()).Send();
+    server.Get("/", [&](RequestContext& ctx) {
+        ServeStaticFile(ctx, static_root, "index.html");
+    });
+    server.Get("/static/*path", [&](RequestContext& ctx) {
+        ServeStaticFile(ctx, static_root, ctx.request.Param("path"));
     });
     server.Get("/healthz", [](RequestContext& ctx) {
         ctx.response.ContentType("text/plain; charset=utf-8").Body("ok").Send();
