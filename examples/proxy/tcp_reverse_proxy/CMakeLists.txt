@@ -6,7 +6,6 @@ add_executable(tcp_reverse_proxy
 
 target_link_libraries(tcp_reverse_proxy PRIVATE
     iouring_runtime_proxy::RuntimeProxy
-    spdlog::spdlog
 )
 
 target_compile_features(tcp_reverse_proxy PRIVATE cxx_std_23)

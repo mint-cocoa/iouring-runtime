@@ -1,0 +1,33 @@
+[Unit]
+Description=io_uring Runtime File Store Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tcp-proxy
+Group=tcp-proxy
+EnvironmentFile=/etc/iouring-runtime/file_store_server.env
+ExecStart=/usr/local/bin/file_store_server
+Restart=always
+RestartSec=1
+
+NoNewPrivileges=true
+LimitNOFILE=1048576
+WorkingDirectory=/var/lib/iouring-runtime
+StateDirectory=iouring-runtime
+RuntimeDirectory=iouring-runtime
+ReadWritePaths=/var/lib/iouring-runtime/files
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

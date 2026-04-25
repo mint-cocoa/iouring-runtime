@@ -5,6 +5,24 @@ on:
   pull_request:
 
 jobs:
+  validate-k8s-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Validate kustomize overlays
+        run: |
+          kubectl kustomize deploy/k8s/home/demo-whoami >/tmp/demo-whoami.yaml
+          kubectl kustomize deploy/k8s/home/ingress-nginx >/tmp/ingress-nginx.yaml
+          kubectl kustomize deploy/k8s/home/metallb >/tmp/metallb.yaml
+          test -s /tmp/demo-whoami.yaml
+          test -s /tmp/ingress-nginx.yaml
+          test -s /tmp/metallb.yaml
+
   build-and-test:
     runs-on: ubuntu-latest
     steps:

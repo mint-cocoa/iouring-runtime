@@ -1,9 +1,9 @@
+#include <iouring_runtime/observability/Logging.h>
 #include <iouring_runtime/web/WebServer.h>
 
 #include <chrono>
 #include <cstdlib>
 #include <limits>
-#include <spdlog/spdlog.h>
 #include <string>
 
 using iouring_runtime::web::RequestContext;
@@ -51,10 +51,8 @@ WorkerAffinityMode ReadWorkerAffinityEnv(
 }
 
 void ConfigureLoggingFromEnv() {
-    if (const char* raw = std::getenv("HELLO_HTTP_LOG_LEVEL")) {
-        auto level = spdlog::level::from_str(raw);
-        spdlog::set_level(level);
-    }
+    iouring_runtime::observability::ConfigureLoggingFromEnv(
+        "HELLO_HTTP_LOG_LEVEL");
 }
 
 } // namespace

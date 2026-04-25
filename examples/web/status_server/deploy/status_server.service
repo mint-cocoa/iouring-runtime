@@ -1,0 +1,32 @@
+[Unit]
+Description=io_uring Runtime Status Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tcp-proxy
+Group=tcp-proxy
+EnvironmentFile=/etc/iouring-runtime/status_server.env
+ExecStart=/usr/local/bin/status_server
+Restart=always
+RestartSec=1
+
+NoNewPrivileges=true
+LimitNOFILE=65536
+WorkingDirectory=/var/lib/iouring-runtime
+StateDirectory=iouring-runtime
+RuntimeDirectory=iouring-runtime
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cerrno>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -23,6 +24,8 @@ constexpr std::uint16_t kTimeoutPort = 19877;
 constexpr std::uint16_t kLimitPort = 19878;
 constexpr std::uint16_t kShutdownPort = 19879;
 constexpr std::uint16_t kPressurePort = 19880;
+constexpr std::uint16_t kStreamFailurePort = 19881;
+constexpr std::uint16_t kDeferredPort = 19882;
 
 int ConnectTcp(std::uint16_t port) {
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -102,6 +105,16 @@ bool SendAll(int fd, std::string_view data) {
         remaining -= static_cast<std::size_t>(n);
     }
     return true;
+}
+
+std::size_t CountOccurrences(std::string_view text, std::string_view needle) {
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string_view::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
 }
 
 } // namespace
@@ -225,4 +238,81 @@ TEST(HttpServerShutdown, StopDrainsAndClosesActiveSessions) {
     stopper.join();
 
     EXPECT_TRUE(peer_closed);
+}
+
+TEST(HttpServerStreaming, BodyCallbackFailureSendsSingleErrorResponse) {
+    WebServerConfig config;
+    config.port = kStreamFailurePort;
+    config.worker_count = 1;
+    config.ring.io_timeout = 1ms;
+    config.timeouts.inactivity = 5s;
+
+    WebServer server(config);
+    server.PostStream("/upload", HttpStreamHandler{
+        .on_body = [](RequestContext&, std::span<const std::byte>) {
+            return false;
+        },
+    });
+    server.Start();
+    std::this_thread::sleep_for(200ms);
+
+    const int fd = ConnectTcp(kStreamFailurePort);
+    ASSERT_GE(fd, 0);
+    ASSERT_TRUE(SendAll(fd,
+                        "POST /upload HTTP/1.1\r\n"
+                        "Host: localhost\r\n"
+                        "Content-Length: 5\r\n"
+                        "\r\n"
+                        "hello"));
+
+    const auto first = RecvWithTimeout(fd, 1500);
+    const auto second = RecvWithTimeout(fd, 200);
+    ::close(fd);
+    server.Stop();
+
+    const auto combined = first + second;
+    EXPECT_NE(combined.find("400 Bad Request"), std::string::npos);
+    EXPECT_EQ(CountOccurrences(combined, "HTTP/1.1 "), 1u);
+}
+
+TEST(HttpServerStreaming, DeferredResponseDoesNotDispatchPipelinedRequestFirst) {
+    WebServerConfig config;
+    config.port = kDeferredPort;
+    config.worker_count = 1;
+    config.ring.io_timeout = 1ms;
+    config.timeouts.inactivity = 5s;
+
+    WebServer server(config);
+    server.PostStream("/defer", HttpStreamHandler{
+        .on_complete = [](RequestContext& ctx) {
+            auto deferred = ctx.DeferResponse();
+            std::this_thread::sleep_for(200ms);
+            deferred.Response().Body("deferred").Send();
+            deferred.Complete();
+        },
+    });
+    server.Get("/fast", [](RequestContext& ctx) {
+        ctx.response.Body("fast").Send();
+    });
+    server.Start();
+    std::this_thread::sleep_for(200ms);
+
+    const int fd = ConnectTcp(kDeferredPort);
+    ASSERT_GE(fd, 0);
+    ASSERT_TRUE(SendAll(fd,
+                        "POST /defer HTTP/1.1\r\n"
+                        "Host: localhost\r\n"
+                        "Content-Length: 0\r\n"
+                        "\r\n"
+                        "GET /fast HTTP/1.1\r\n"
+                        "Host: localhost\r\n"
+                        "\r\n"));
+
+    const auto response = RecvWithTimeout(fd, 1500);
+    ::close(fd);
+    server.Stop();
+
+    EXPECT_NE(response.find("200 OK"), std::string::npos);
+    EXPECT_NE(response.find("deferred"), std::string::npos);
+    EXPECT_EQ(response.find("fast"), std::string::npos);
 }

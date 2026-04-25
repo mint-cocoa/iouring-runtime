@@ -4,6 +4,7 @@
 #include <iouring_runtime/web/HttpStatus.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,7 @@
 namespace iouring_runtime::web {
 
 class HttpSession;
+struct RequestContext;
 
 class HttpResponse {
 public:
@@ -74,7 +76,11 @@ public:
     }
 
     bool IsSent() const {
-        return sent_;
+        return state_ == State::kSent;
+    }
+
+    bool IsDeferred() const {
+        return state_ == State::kDeferred;
     }
 
     bool GetKeepAlive() const {
@@ -85,11 +91,21 @@ public:
         return last_built_bytes_;
     }
 
-    void MarkSent() {
-        sent_ = true;
+private:
+    friend struct RequestContext;
+
+    enum class State : std::uint8_t {
+        kOpen,
+        kSent,
+        kDeferred,
+    };
+
+    void MarkDeferred() {
+        if (state_ == State::kOpen) {
+            state_ = State::kDeferred;
+        }
     }
 
-private:
     struct HeaderPair {
         std::string name;
         std::string value;
@@ -100,7 +116,7 @@ private:
     std::string content_type_;
     std::string body_;
     bool keep_alive_ = true;
-    bool sent_ = false;
+    State state_ = State::kOpen;
     bool suppress_body_ = false;
     mutable std::size_t last_built_bytes_ = 0;
     HttpSession* session_ = nullptr;

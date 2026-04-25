@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 
 struct llhttp__internal_s;
@@ -16,6 +17,16 @@ typedef struct llhttp_settings_s llhttp_settings_t;
 namespace iouring_runtime::web {
 
 using OnRequestCallback = std::function<bool(HttpRequest&)>;
+
+enum class HttpBodyMode : std::uint8_t {
+    kBuffer,
+    kDiscard,
+    kStream,
+};
+
+using OnHeadersCallback = std::function<HttpBodyMode(HttpRequest&)>;
+using OnBodyChunkCallback =
+    std::function<bool(HttpRequest&, std::span<const std::byte>)>;
 
 enum class HttpParseStatus : std::uint8_t {
     kOk,
@@ -44,6 +55,14 @@ public:
         on_request_ = std::move(cb);
     }
 
+    void SetOnHeaders(OnHeadersCallback cb) {
+        on_headers_ = std::move(cb);
+    }
+
+    void SetOnBodyChunk(OnBodyChunkCallback cb) {
+        on_body_chunk_ = std::move(cb);
+    }
+
     std::uint32_t Feed(const char* data, std::uint32_t len);
 
     bool HasError() const;
@@ -70,10 +89,14 @@ private:
     std::unique_ptr<llhttp_settings_t> settings_;
     HttpRequest request_;
     OnRequestCallback on_request_;
+    OnHeadersCallback on_headers_;
+    OnBodyChunkCallback on_body_chunk_;
     HttpParserOptions options_;
     HttpParseStatus status_ = HttpParseStatus::kOk;
     bool stop_requested_ = false;
+    HttpBodyMode body_mode_ = HttpBodyMode::kBuffer;
     std::uint32_t header_bytes_used_ = 0;
+    std::uint64_t body_bytes_seen_ = 0;
     std::string current_header_field_;
     std::string current_header_value_;
     std::string raw_url_;

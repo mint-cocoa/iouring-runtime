@@ -1,8 +1,8 @@
 #pragma once
 
 #include <iouring_runtime/core/MmapGuard.h>
-#include <iouring_runtime/core/Profiler.h>
 #include <iouring_runtime/core/Error.h>
+#include <iouring_runtime/observability/Profiler.h>
 
 #include <atomic>
 #include <cstddef>

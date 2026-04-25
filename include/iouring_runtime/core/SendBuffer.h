@@ -1,8 +1,8 @@
 #pragma once
 
 #include <iouring_runtime/core/Error.h>
-#include <iouring_runtime/core/Profiler.h>
 #include <iouring_runtime/core/MpscQueue.h>
+#include <iouring_runtime/observability/Profiler.h>
 
 #include <algorithm>
 #include <atomic>
@@ -105,6 +105,7 @@ public:
 
     std::expected<SendBufferRef, CoreError> Allocate(std::uint32_t size) {
         std::scoped_lock lock(mutex_);
+        LockMark(mutex_);
         FlushPendingGc();
 
         // Try current active chunk
@@ -134,6 +135,7 @@ private:
             pending_gc_.Push(chunk);
             return;
         }
+        LockMark(mutex_);
         MoveToFree(chunk);
     }
 

@@ -1,9 +1,11 @@
 #include <iouring_runtime/web/Router.h>
+#include <iouring_runtime/web/RadixTree.h>
 
 #include <gtest/gtest.h>
 
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 using namespace iouring_runtime::web;
 
@@ -145,4 +147,20 @@ TEST_F(RouterTest, HandlerExceptionReturns500) {
     EXPECT_TRUE(response.IsSent());
     EXPECT_EQ(response.StatusCode(), HttpStatus::kInternalServerError);
     EXPECT_EQ(response.GetBody(), "Internal Server Error");
+}
+
+TEST(RouterStreamTest, MatchesStreamRouteWithParams) {
+    RadixTree tree;
+    RouteEntry entry;
+    entry.stream_handler.on_headers = [](RequestContext&) { return true; };
+    tree.Insert(HttpMethod::kPut, "/files/*path", std::move(entry));
+
+    auto result = tree.Match(HttpMethod::kPut, "/files/a/b.txt");
+
+    ASSERT_NE(result.entry, nullptr);
+    EXPECT_TRUE(result.entry->HasStreamHandler());
+    ASSERT_EQ(result.params.size(), 1u);
+    EXPECT_EQ(result.params[0].first, "path");
+    EXPECT_EQ(result.params[0].second, "a/b.txt");
+    EXPECT_TRUE(result.path_exists);
 }

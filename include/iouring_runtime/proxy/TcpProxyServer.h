@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace iouring_runtime::core::buffer {
@@ -79,6 +80,11 @@ struct TcpProxyConfig {
         }
     };
 
+    struct MetricsOptions {
+        std::string file_path;
+        std::chrono::milliseconds interval{1000};
+    };
+
     struct UpstreamRoute {
         std::string hostname;
         std::string upstream_host;
@@ -100,6 +106,7 @@ struct TcpProxyConfig {
     BackpressureOptions backpressure;
     DownstreamTlsOptions downstream_tls;
     CertbotOptions certbot;
+    MetricsOptions metrics;
 };
 
 class TcpProxyServer {
@@ -110,6 +117,8 @@ public:
     void Start();
     void Stop();
     [[nodiscard]] bool ReloadDownstreamTlsContext();
+    [[nodiscard]] std::string SnapshotMetricsJson() const;
+    [[nodiscard]] bool WriteMetricsSnapshot() const;
 
     static void InstallStopSignalHandlers();
     static void RequestStop() noexcept;
@@ -140,6 +149,8 @@ private:
     bool WaitForZeroConnections(std::chrono::milliseconds timeout);
     void ConfigureWorkerAffinity(detail::TcpProxyWorker& worker);
     void WorkerLoop(detail::TcpProxyWorker& worker);
+    void StartMetricsWriter();
+    void StopMetricsWriter();
 
     TcpProxyConfig config_;
     std::vector<std::unique_ptr<detail::TcpProxyWorker>> workers_;
@@ -148,6 +159,11 @@ private:
     mutable std::mutex downstream_tls_context_mu_;
     std::shared_ptr<detail::DownstreamTlsContext> downstream_tls_context_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> metrics_writer_running_{false};
+    std::thread metrics_thread_;
+    std::chrono::steady_clock::time_point started_at_{};
+    std::atomic<std::int64_t> last_tls_reload_success_unix_{0};
+    std::atomic<std::int64_t> last_tls_reload_failure_unix_{0};
 };
 
 } // namespace iouring_runtime::proxy

@@ -2,6 +2,10 @@ add_executable(test_mpsc_queue core/test_mpsc_queue.cpp)
 target_link_libraries(test_mpsc_queue PRIVATE Runtime GTest::gtest_main)
 add_test(NAME test_mpsc_queue COMMAND test_mpsc_queue)
 
+add_executable(test_observability_logging observability/test_logging.cpp)
+target_link_libraries(test_observability_logging PRIVATE RuntimeObservability GTest::gtest_main)
+add_test(NAME test_observability_logging COMMAND test_observability_logging)
+
 add_executable(test_session_lifecycle io/test_session_lifecycle.cpp)
 target_link_libraries(test_session_lifecycle PRIVATE Runtime GTest::gtest_main)
 add_test(NAME test_session_lifecycle COMMAND test_session_lifecycle)
@@ -37,6 +41,10 @@ add_test(NAME test_poll_add COMMAND test_poll_add)
 add_executable(test_timeout ring/test_timeout.cpp)
 target_link_libraries(test_timeout PRIVATE Runtime GTest::gtest_main)
 add_test(NAME test_timeout COMMAND test_timeout)
+
+add_executable(test_write ring/test_write.cpp)
+target_link_libraries(test_write PRIVATE Runtime GTest::gtest_main)
+add_test(NAME test_write COMMAND test_write)
 
 if(BUILD_WEB)
     add_executable(test_http_parser web/test_http_parser.cpp)

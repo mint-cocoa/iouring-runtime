@@ -171,3 +171,114 @@ After each renewal, `certbot` runs that deploy hook, which calls
 `systemctl reload tcp_reverse_proxy.service`. That sends `SIGHUP`, reloads
 the OpenSSL context, and keeps existing TLS sessions alive while new
 connections start using the renewed certificate.
+
+## Status Server Upstream
+
+The optional `status_server` example uses the web module to expose a small
+runtime dashboard on localhost. Build with `BUILD_WEB=ON`, install the binary
+and unit, then add a proxy route for the subdomain:
+
+```bash
+sudo install -D -m 0755 build-proxy/bin/status_server /usr/local/bin/status_server
+sudo install -D -m 0644 examples/web/status_server/deploy/status_server.service \
+  /etc/systemd/system/status_server.service
+sudo install -D -m 0644 examples/web/status_server/deploy/status_server.env.example \
+  /etc/iouring-runtime/status_server.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now status_server.service
+```
+
+Append the route to `TCP_PROXY_UPSTREAM_ROUTES`:
+
+```text
+status.mintcocoa.cc=127.0.0.1:3010
+```
+
+Then restart or reload the proxy so the new route is picked up.
+
+The status server also reads the proxy runtime metrics snapshot when both
+services use the default metrics path:
+
+```text
+TCP_PROXY_METRICS_FILE=/run/iouring-runtime/tcp_reverse_proxy.metrics.json
+STATUS_PROXY_METRICS_FILE=/run/iouring-runtime/tcp_reverse_proxy.metrics.json
+```
+
+## Kubernetes Demo Upstream
+
+The repository includes GitOps manifests for a small `traefik/whoami` demo at
+`deploy/k8s/home/demo-whoami/`. The intended home-lab path is:
+
+```text
+tcp_reverse_proxy -> 192.168.0.240:80 -> ingress-nginx -> whoami Service
+```
+
+Append the route to `TCP_PROXY_UPSTREAM_ROUTES`:
+
+```text
+demo.mintcocoa.cc=192.168.0.240:80
+```
+
+Apply the Argo CD application manifest from
+`deploy/k8s/home/argocd/demo-whoami-application.yaml`, then let Argo CD sync the
+demo manifests. MetalLB should reserve `192.168.0.240` for the ingress-nginx
+LoadBalancer service.
+
+## OpenSpeedTest Upstream
+
+The optional `speedtest_server` example serves the OpenSpeedTest UI and handles
+the upload/download endpoints with the C++ web module. It avoids keeping upload
+bodies in memory by configuring the parser to discard `/upload` request bodies.
+
+Install the binary, bundled static files, and unit:
+
+```bash
+sudo install -D -m 0755 build-proxy/bin/speedtest_server /usr/local/bin/speedtest_server
+sudo install -d -m 0755 /usr/local/share/iouring-runtime/openspeedtest
+sudo cp -R examples/web/speedtest_server/public/. \
+  /usr/local/share/iouring-runtime/openspeedtest/
+sudo install -D -m 0644 examples/web/speedtest_server/deploy/speedtest_server.service \
+  /etc/systemd/system/speedtest_server.service
+sudo install -D -m 0644 examples/web/speedtest_server/deploy/speedtest_server.env.example \
+  /etc/iouring-runtime/speedtest_server.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now speedtest_server.service
+```
+
+Route the existing speed subdomain to it:
+
+```text
+speed.mintcocoa.cc=127.0.0.1:3004
+```
+
+If another OpenSpeedTest container is already bound to port `3004`, stop that
+container before starting `speedtest_server`, or change `SPEEDTEST_PORT` and the
+matching proxy route together.
+
+## File Store Upstream
+
+The optional `file_store_server` example provides a small browser file store.
+Uploads use streaming request-body handlers, so large request bodies are written
+to `.part` files as chunks arrive instead of being buffered in memory.
+
+Install the binary, environment file, and unit:
+
+```bash
+sudo install -D -m 0755 build-proxy/bin/file_store_server /usr/local/bin/file_store_server
+sudo install -d -o tcp-proxy -g tcp-proxy -m 0755 /var/lib/iouring-runtime/files
+sudo install -D -m 0644 examples/web/file_store_server/deploy/file_store_server.service \
+  /etc/systemd/system/file_store_server.service
+sudo install -D -m 0644 examples/web/file_store_server/deploy/file_store_server.env.example \
+  /etc/iouring-runtime/file_store_server.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now file_store_server.service
+```
+
+Append the route to `TCP_PROXY_UPSTREAM_ROUTES`:
+
+```text
+files.mintcocoa.cc=127.0.0.1:3012
+```
+
+Set `FILE_STORE_AUTH_TOKEN` in `/etc/iouring-runtime/file_store_server.env` if
+uploads and deletes should require a bearer token.

@@ -1,9 +1,10 @@
 #pragma once
 
 #include <iouring_runtime/web/HttpMethod.h>
+#include <iouring_runtime/web/Router.h>
 
 #include <array>
-#include <functional>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -12,11 +13,17 @@
 
 namespace iouring_runtime::web {
 
-struct RequestContext;
-using HttpHandler = std::function<void(RequestContext&)>;
+struct RouteEntry {
+    HttpHandler handler;
+    HttpStreamHandler stream_handler;
+
+    bool HasHandler() const;
+    bool HasStreamHandler() const;
+    bool HasAnyHandler() const;
+};
 
 struct MatchResult {
-    HttpHandler* handler = nullptr;
+    RouteEntry* entry = nullptr;
     std::vector<std::pair<std::string_view, std::string_view>> params;
     bool path_exists = false;
 };
@@ -31,7 +38,7 @@ public:
     RadixTree(RadixTree&&) noexcept;
     RadixTree& operator=(RadixTree&&) noexcept;
 
-    void Insert(HttpMethod method, const std::string& path, HttpHandler handler);
+    void Insert(HttpMethod method, const std::string& path, RouteEntry entry);
     MatchResult Match(HttpMethod method, std::string_view path) const;
 
 private:
@@ -45,7 +52,7 @@ private:
         std::string param_name;
         std::unique_ptr<Node> wildcard_child;
         std::string wildcard_name;
-        std::array<HttpHandler, kMethodCount> handlers{};
+        std::array<RouteEntry, kMethodCount> routes{};
 
         bool HasAnyHandler() const;
     };
@@ -55,7 +62,7 @@ private:
 
     void InsertSegments(Node* node, const std::vector<std::string>& segments,
                         std::size_t index, HttpMethod method,
-                        HttpHandler handler);
+                        RouteEntry entry);
     void MatchNode(const Node* node,
                    const std::vector<std::string_view>& segments,
                    std::size_t index, HttpMethod method, MatchResult& result,

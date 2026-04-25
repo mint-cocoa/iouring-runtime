@@ -15,6 +15,7 @@ protected:
     virtual void OnAccept(AcceptEvent& ev, std::int32_t result, std::uint32_t flags) {}
     virtual void OnRecv(RecvEvent& ev, std::int32_t result, std::uint32_t flags) {}
     virtual void OnRead(ReadEvent& ev, std::int32_t result) {}
+    virtual void OnWrite(WriteEvent& ev, std::int32_t result) {}
     virtual void OnSend(SendEvent& ev, std::int32_t result) {}
     virtual void OnConnect(ConnectEvent& ev, std::int32_t result) {}
     virtual void OnDisconnect(DisconnectEvent& ev, std::int32_t result) {}
@@ -32,6 +33,9 @@ inline void EventHandler::Dispatch(IoEvent* ev, std::int32_t result, std::uint32
             break;
         case EventType::kRead:
             OnRead(static_cast<ReadEvent&>(*ev), result);
+            break;
+        case EventType::kWrite:
+            OnWrite(static_cast<WriteEvent&>(*ev), result);
             break;
         case EventType::kSend:
             OnSend(static_cast<SendEvent&>(*ev), result);

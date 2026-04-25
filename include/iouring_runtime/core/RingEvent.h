@@ -18,6 +18,7 @@ enum class EventType : std::uint8_t {
     kAccept,
     kRecv,
     kRead,
+    kWrite,
     kSend,
     kConnect,
     kDisconnect,
@@ -71,6 +72,11 @@ private:
 class ReadEvent : public IoEvent {
 public:
     ReadEvent() : IoEvent(EventType::kRead) {}
+};
+
+class WriteEvent : public IoEvent {
+public:
+    WriteEvent() : IoEvent(EventType::kWrite) {}
 };
 
 class SendEvent : public IoEvent {

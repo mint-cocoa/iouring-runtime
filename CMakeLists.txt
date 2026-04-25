@@ -13,6 +13,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 set(IORUNTIME_PACKAGE_NAME iouring_runtime)
+set(IORUNTIME_OBSERVABILITY_PACKAGE_NAME iouring_runtime_observability)
 set(IORUNTIME_WEB_PACKAGE_NAME iouring_runtime_web)
 set(IORUNTIME_PROXY_PACKAGE_NAME iouring_runtime_proxy)
 
@@ -79,14 +80,37 @@ if(NOT IORUNTIME_SANITIZER STREQUAL "off")
     message(STATUS "Sanitizer enabled: ${IORUNTIME_SANITIZER}")
 endif()
 
+add_library(RuntimeObservability STATIC
+    src/modules/observability/Logging.cpp
+)
+
+add_library(${IORUNTIME_OBSERVABILITY_PACKAGE_NAME}::RuntimeObservability ALIAS RuntimeObservability)
+add_library(iouring::RuntimeObservability ALIAS RuntimeObservability)
+
+target_include_directories(RuntimeObservability
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${spdlog_SOURCE_DIR}/include
+)
+
+if(IORUNTIME_TRACY)
+    target_link_libraries(RuntimeObservability PUBLIC Tracy::TracyClient)
+endif()
+
+target_compile_options(RuntimeObservability PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(Runtime STATIC
-    src/ring/RingBuffer.cpp
-    src/ring/IoRing.cpp
-    src/io/Session.cpp
-    src/io/Listener.cpp
-    src/job/GlobalQueue.cpp
-    src/job/JobQueue.cpp
-    src/job/JobTimer.cpp
+    src/runtime/common/CpuAffinity.cpp
+    src/runtime/ring/RingBuffer.cpp
+    src/runtime/ring/IoRing.cpp
+    src/runtime/io/Session.cpp
+    src/runtime/io/SessionSend.cpp
+    src/runtime/io/Listener.cpp
+    src/runtime/job/GlobalQueue.cpp
+    src/runtime/job/JobQueue.cpp
+    src/runtime/job/JobTimer.cpp
 )
 
 add_library(${IORUNTIME_PACKAGE_NAME}::Runtime ALIAS Runtime)
@@ -97,29 +121,32 @@ target_include_directories(Runtime
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
-        ${spdlog_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
 )
 
 target_link_libraries(Runtime
     PUBLIC
+        RuntimeObservability
         PkgConfig::URING
         Threads::Threads
 )
-
-if(IORUNTIME_TRACY)
-    target_link_libraries(Runtime PUBLIC Tracy::TracyClient)
-endif()
 
 target_compile_options(Runtime PRIVATE -Wall -Wextra -Wpedantic)
 
 if(BUILD_WEB)
     add_library(RuntimeWeb STATIC
-        src/web/HttpParser.cpp
-        src/web/HttpResponse.cpp
-        src/web/RadixTree.cpp
-        src/web/Router.cpp
-        src/web/HttpSession.cpp
-        src/web/WebServer.cpp
+        src/modules/web/HttpParser.cpp
+        src/modules/web/HttpResponse.cpp
+        src/modules/web/RadixTree.cpp
+        src/modules/web/Router.cpp
+        src/modules/web/RouterDeferred.cpp
+        src/modules/web/HttpSession.cpp
+        src/modules/web/HttpSessionRecv.cpp
+        src/modules/web/HttpSessionRequest.cpp
+        src/modules/web/HttpSessionStream.cpp
+        src/modules/web/HttpSessionTimeout.cpp
+        src/modules/web/WebServer.cpp
+        src/modules/web/WebServerWorker.cpp
     )
 
     add_library(${IORUNTIME_WEB_PACKAGE_NAME}::RuntimeWeb ALIAS RuntimeWeb)
@@ -129,8 +156,8 @@ if(BUILD_WEB)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
         PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
             ${llhttp_SOURCE_DIR}/include
-            ${spdlog_SOURCE_DIR}/include
     )
 
     target_link_libraries(RuntimeWeb
@@ -147,12 +174,14 @@ if(BUILD_PROXY)
     find_package(OpenSSL REQUIRED)
 
     add_library(RuntimeProxy STATIC
-        src/proxy/AcmeChallengeSession.cpp
-        src/proxy/DownstreamTlsContext.cpp
-        src/proxy/ProxyCommon.cpp
-        src/proxy/ProxyConnector.cpp
-        src/proxy/ProxySessions.cpp
-        src/proxy/TcpProxyServer.cpp
+        src/modules/proxy/AcmeChallengeSession.cpp
+        src/modules/proxy/DownstreamTlsContext.cpp
+        src/modules/proxy/ProxyBridge.cpp
+        src/modules/proxy/ProxyCommon.cpp
+        src/modules/proxy/ProxyConnector.cpp
+        src/modules/proxy/ProxySessions.cpp
+        src/modules/proxy/TcpProxyServer.cpp
+        src/modules/proxy/TcpProxyServerWorker.cpp
     )
 
     add_library(${IORUNTIME_PROXY_PACKAGE_NAME}::RuntimeProxy ALIAS RuntimeProxy)
@@ -162,7 +191,7 @@ if(BUILD_PROXY)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
         PRIVATE
-            ${spdlog_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
     )
 
     target_link_libraries(RuntimeProxy
@@ -182,7 +211,10 @@ set(_EXAMPLE_DIRS
 )
 if(BUILD_WEB)
     list(APPEND _EXAMPLE_DIRS
+        examples/web/file_store_server
         examples/web/hello_http
+        examples/web/speedtest_server
+        examples/web/status_server
     )
 endif()
 if(BUILD_PROXY)
@@ -214,7 +246,7 @@ if(BUILD_TESTS)
 endif()
 
 install(
-    TARGETS Runtime
+    TARGETS Runtime RuntimeObservability
     EXPORT ${IORUNTIME_PACKAGE_NAME}Targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -245,6 +277,11 @@ endif()
 
 install(
     DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/core"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
+)
+
+install(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/observability"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
 )
 

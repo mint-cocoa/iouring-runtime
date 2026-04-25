@@ -4,6 +4,7 @@
 #include <iouring_runtime/core/Listener.h>
 #include <iouring_runtime/web/HttpMethod.h>
 #include <iouring_runtime/web/HttpParser.h>
+#include <iouring_runtime/web/HttpSession.h>
 #include <iouring_runtime/web/Router.h>
 
 #include <atomic>
@@ -69,6 +70,8 @@ public:
     ~WebServer();
 
     void Route(HttpMethod method, std::string path, HttpHandler handler);
+    void RouteStream(HttpMethod method, std::string path,
+                     HttpStreamHandler handler);
 
     void Get(std::string path, HttpHandler handler) {
         Route(HttpMethod::kGet, std::move(path), std::move(handler));
@@ -84,6 +87,14 @@ public:
 
     void Put(std::string path, HttpHandler handler) {
         Route(HttpMethod::kPut, std::move(path), std::move(handler));
+    }
+
+    void PutStream(std::string path, HttpStreamHandler handler) {
+        RouteStream(HttpMethod::kPut, std::move(path), std::move(handler));
+    }
+
+    void PostStream(std::string path, HttpStreamHandler handler) {
+        RouteStream(HttpMethod::kPost, std::move(path), std::move(handler));
     }
 
     void Delete(std::string path, HttpHandler handler) {

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <iouring_runtime/core/Noncopyable.h>
-#include <iouring_runtime/core/Profiler.h>
 #include <iouring_runtime/core/Error.h>
 #include <iouring_runtime/core/RingBuffer.h>
 #include <iouring_runtime/core/RingEvent.h>
+#include <iouring_runtime/observability/Profiler.h>
 
 #include <chrono>
 #include <cstdint>
@@ -57,6 +57,8 @@ public:
     [[nodiscard]] bool PrepRecvMultishot(RecvEvent& ev, int fd);
     [[nodiscard]] bool PrepRead(ReadEvent& ev, int fd, void* buf, unsigned nbytes,
                                 std::uint64_t offset);
+    [[nodiscard]] bool PrepWrite(WriteEvent& ev, int fd, const void* buf,
+                                 unsigned nbytes, std::uint64_t offset);
     [[nodiscard]] bool PrepSendMsg(SendEvent& ev, int fd, struct msghdr* msg, unsigned flags);
     [[nodiscard]] bool PrepAcceptMultishot(AcceptEvent& ev, int listen_fd);
     [[nodiscard]] bool PrepDisconnect(DisconnectEvent& ev, int fd);

@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -142,6 +143,13 @@ void WriteTextFile(const std::string& path, std::string_view content) {
     out << content;
     out.close();
     ASSERT_TRUE(out.good());
+}
+
+std::string ReadWholeFile(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream out;
+    out << in.rdbuf();
+    return out.str();
 }
 
 struct TestTlsFiles {
@@ -599,6 +607,53 @@ TEST(TcpProxyServerTest, ProxiesTcpTrafficToUpstream) {
     ::close(client);
     proxy.Stop();
     upstream.Stop();
+}
+
+TEST(TcpProxyServerTest, WritesRuntimeMetricsSnapshotAtomically) {
+    EchoServer upstream;
+    const auto metrics_dir =
+        std::filesystem::temp_directory_path() /
+        ("iouring-runtime-metrics-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(metrics_dir);
+    std::filesystem::create_directories(metrics_dir);
+    const auto metrics_file = metrics_dir / "tcp_reverse_proxy.metrics.json";
+
+    iouring_runtime::proxy::TcpProxyConfig config;
+    config.listen_host = "127.0.0.1";
+    config.listen_port = ReserveTcpPort();
+    config.upstream_host = "127.0.0.1";
+    config.upstream_port = upstream.Port();
+    config.worker_count = 2;
+    config.ring.queue_depth = 128;
+    config.ring.buf_count = 64;
+    config.ring.buf_size = 4096;
+    config.ring.io_timeout = 1ms;
+    config.timeouts.connect = 500ms;
+    config.timeouts.inactivity = 2s;
+    config.metrics.file_path = metrics_file.string();
+    config.metrics.interval = 25ms;
+    config.upstream_routes.push_back({
+        .hostname = "demo.example.test",
+        .upstream_host = "127.0.0.1",
+        .upstream_port = upstream.Port(),
+    });
+
+    iouring_runtime::proxy::TcpProxyServer proxy(config);
+    proxy.Start();
+    ASSERT_TRUE(proxy.WriteMetricsSnapshot());
+
+    const auto body = ReadWholeFile(metrics_file);
+    EXPECT_NE(body.find("\"service\":\"tcp_reverse_proxy\""), std::string::npos);
+    EXPECT_NE(body.find("\"configured_worker_count\":2"), std::string::npos);
+    EXPECT_NE(body.find("\"running_worker_count\":2"), std::string::npos);
+    EXPECT_NE(body.find("\"demo.example.test\""), std::string::npos);
+    EXPECT_NE(body.find("\"total_live_sessions\""), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(metrics_file.string() + ".tmp." +
+                                         std::to_string(static_cast<long long>(::getpid()))));
+
+    proxy.Stop();
+    upstream.Stop();
+    std::filesystem::remove_all(metrics_dir);
 }
 
 TEST(TcpProxyServerTest, TerminatesDownstreamTlsAndProxiesTraffic) {

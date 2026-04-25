@@ -1,3 +1,4 @@
+#include <iouring_runtime/observability/Logging.h>
 #include <iouring_runtime/proxy/TcpProxyServer.h>
 
 #include <algorithm>
@@ -7,12 +8,14 @@
 #include <limits>
 #include <optional>
 #include <sstream>
-#include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace {
+
+namespace obs = iouring_runtime::observability;
+constexpr auto kLogCategory = obs::LogCategory::kProxy;
 
 template <typename T>
 T ReadUnsignedEnv(const char* name, T fallback) {
@@ -144,7 +147,9 @@ std::vector<UpstreamRoute> ReadUpstreamRoutesEnv(const char* name) {
 
         const auto eq = token.find('=');
         if (eq == std::string::npos) {
-            spdlog::warn("tcp_reverse_proxy: ignoring invalid route '{}'", token);
+            obs::LogWarn(kLogCategory,
+                         "tcp_reverse_proxy: ignoring invalid route '{}'",
+                         token);
             continue;
         }
 
@@ -152,7 +157,9 @@ std::vector<UpstreamRoute> ReadUpstreamRoutesEnv(const char* name) {
         auto upstream =
             ParseUpstreamTarget(std::string_view(token).substr(eq + 1));
         if (hostname.empty() || !upstream) {
-            spdlog::warn("tcp_reverse_proxy: ignoring invalid route '{}'", token);
+            obs::LogWarn(kLogCategory,
+                         "tcp_reverse_proxy: ignoring invalid route '{}'",
+                         token);
             continue;
         }
 
@@ -167,10 +174,7 @@ std::vector<UpstreamRoute> ReadUpstreamRoutesEnv(const char* name) {
 }
 
 void ConfigureLoggingFromEnv() {
-    if (const char* raw = std::getenv("TCP_PROXY_LOG_LEVEL")) {
-        auto level = spdlog::level::from_str(raw);
-        spdlog::set_level(level);
-    }
+    obs::ConfigureLoggingFromEnv("TCP_PROXY_LOG_LEVEL");
 }
 
 } // namespace
@@ -203,6 +207,12 @@ int main() {
     config.certbot.challenge_webroot =
         ReadStringEnv("TCP_PROXY_CERTBOT_CHALLENGE_WEBROOT",
                       config.certbot.challenge_webroot);
+    config.metrics.file_path =
+        ReadStringEnv("TCP_PROXY_METRICS_FILE",
+                      "/run/iouring-runtime/tcp_reverse_proxy.metrics.json");
+    config.metrics.interval =
+        ReadMillisecondsEnv("TCP_PROXY_METRICS_INTERVAL_MS",
+                            config.metrics.interval);
     config.worker_count =
         ReadUnsignedEnv<std::uint16_t>("TCP_PROXY_WORKERS", 1);
     config.worker_affinity =
@@ -275,7 +285,9 @@ int main() {
     while (!iouring_runtime::proxy::TcpProxyServer::StopRequested()) {
         if (iouring_runtime::proxy::TcpProxyServer::ConsumeReloadRequest()) {
             if (!server.ReloadDownstreamTlsContext()) {
-                spdlog::error("tcp_reverse_proxy: failed to reload downstream TLS context");
+                obs::LogError(
+                    kLogCategory,
+                    "tcp_reverse_proxy: failed to reload downstream TLS context");
             }
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
