@@ -121,6 +121,20 @@ The root `Dockerfile` builds the `dropapp` image. On `main`, the
 `dropapp image` workflow pushes `ghcr.io/mint-cocoa/dropapp:${GITHUB_SHA}` and
 updates `apps/dropapp/values.yaml` in `mint-cocoa/home-k8s-gitops`.
 
+Build and run the `webhook_inbox` web example:
+
+```bash
+cmake -S . -B build-webhook-inbox \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_WEB=ON \
+  -DBUILD_EXAMPLES=ON \
+  -DBUILD_TESTS=OFF
+cmake --build build-webhook-inbox --target webhook_inbox -j$(nproc)
+WEBHOOK_INBOX_ROOT=/tmp/webhook-inbox WEBHOOK_INBOX_PORT=3000 \
+  WEBHOOK_INBOX_STATIC_ROOT=examples/web/webhook_inbox/static \
+  ./build-webhook-inbox/bin/webhook_inbox
+```
+
 ## Tests
 
 ```bash

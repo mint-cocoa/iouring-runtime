@@ -216,6 +216,7 @@ if(BUILD_WEB)
         examples/web/hello_http
         examples/web/speedtest_server
         examples/web/status_server
+        examples/web/webhook_inbox
     )
 endif()
 if(BUILD_PROXY)

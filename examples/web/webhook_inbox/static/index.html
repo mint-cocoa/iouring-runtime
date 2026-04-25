@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>webhook inbox</title>
+<style>
+:root{color-scheme:dark;--bg:#101319;--panel:#171d26;--line:#2b3544;--text:#edf2f7;--muted:#9ba8b8;--accent:#2f81f7;--bad:#da3633}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 40px}header{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:16px}
+h1{font-size:28px;margin:0;letter-spacing:0}.muted{color:var(--muted)}.toolbar{display:grid;grid-template-columns:180px 1fr 210px auto;gap:10px;margin-bottom:14px}
+input,textarea{min-width:0;background:#0d1117;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:9px}
+button{border:0;border-radius:6px;padding:9px 13px;color:white;background:var(--accent);cursor:pointer;white-space:nowrap}.danger{background:var(--bad)}.copy{background:#46586d}
+.grid{display:grid;grid-template-columns:minmax(340px,420px) 1fr;gap:14px}.panel{border:1px solid var(--line);background:var(--panel);border-radius:8px;overflow:hidden}.panel h2{font-size:13px;text-transform:uppercase;color:var(--muted);margin:0;padding:10px 12px;border-bottom:1px solid var(--line)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;border-bottom:1px solid var(--line);padding:9px 10px;vertical-align:middle}th{font-size:12px;color:var(--muted);font-weight:600}.event{cursor:pointer}.event:hover{background:#202938}.selected{background:#263244}
+.method{font-weight:700}.right{text-align:right}.body{white-space:pre-wrap;word-break:break-word;background:#0d1117;margin:0;padding:12px;min-height:260px}.headers{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#c9d1d9}
+@media(max-width:860px){header{display:block}.toolbar{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.hide-sm{display:none}}
+</style></head><body><main>
+<header><div><h1>webhook inbox</h1><div class="muted">Capture HTTP webhooks and inspect their payloads.</div></div><div id="summary" class="muted"></div></header>
+<div class="toolbar"><input id="inbox" value="default" placeholder="inbox"><input id="endpoint" readonly><input id="token" type="password" placeholder="read token"><button id="copy" class="copy">Copy URL</button></div>
+<div class="grid">
+<section class="panel"><h2>Events</h2><table><thead><tr><th>Method</th><th>Inbox</th><th class="right">Size</th></tr></thead><tbody id="rows"></tbody></table></section>
+<section class="panel"><h2>Detail</h2><div id="detail" class="body muted">Select an event.</div></section>
+</div>
+<script>
+const inbox=document.getElementById('inbox'), endpoint=document.getElementById('endpoint'), token=document.getElementById('token'), copy=document.getElementById('copy'), rows=document.getElementById('rows'), detail=document.getElementById('detail'), summary=document.getElementById('summary');
+let selected='';
+function auth(){return token.value?{'Authorization':'Bearer '+token.value}:{}}
+function size(n){const u=['B','KiB','MiB','GiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]}
+function safeInbox(){return (inbox.value||'default').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'')||'default'}
+function syncEndpoint(){endpoint.value=location.origin+'/hook/'+safeInbox()}
+async function refresh(){syncEndpoint();const r=await fetch('/api/events?inbox='+encodeURIComponent(safeInbox()),{headers:auth()});if(r.status===401){rows.innerHTML='<tr><td colspan="3" class="muted">Token required.</td></tr>';return}const events=await r.json();summary.textContent=events.length+' event'+(events.length===1?'':'s');rows.innerHTML='';for(const e of events){const tr=document.createElement('tr');tr.className='event'+(e.id===selected?' selected':'');tr.innerHTML=`<td><span class="method">${e.method}</span><div class="muted">${new Date(e.received_at*1000).toLocaleString()}</div></td><td>${e.inbox}<div class="muted hide-sm">${e.content_type||'no content type'}</div></td><td class="right">${size(e.size)}</td>`;tr.onclick=()=>load(e.id);rows.appendChild(tr)}if(!events.length){rows.innerHTML='<tr><td colspan="3" class="muted">No events yet.</td></tr>'}}
+async function load(id){selected=id;const r=await fetch('/api/events/'+encodeURIComponent(id),{headers:auth()});if(!r.ok){detail.textContent=await r.text();return}const data=await r.json(), e=data.event;const headers=e.headers.map(h=>h.name+': '+h.value).join('\n');detail.innerHTML=`<div><b>${e.method}</b> /hook/${e.inbox}${e.path==='/'?'':e.path}</div><div class="muted">${new Date(e.received_at*1000).toLocaleString()} | ${size(e.size)} | ${e.remote_addr}</div><hr><div class="headers"></div><hr><pre class="body"></pre><div style="padding:12px"><button class="danger">Delete</button></div>`;detail.querySelector('.headers').textContent=headers;detail.querySelector('pre').textContent=data.body;detail.querySelector('button').onclick=async()=>{await fetch('/api/events/'+encodeURIComponent(id),{method:'DELETE',headers:auth()});selected='';detail.className='body muted';detail.textContent='Select an event.';refresh()};refresh()}
+copy.onclick=async()=>{syncEndpoint();await navigator.clipboard.writeText(endpoint.value)}
+inbox.oninput=refresh;token.oninput=refresh;syncEndpoint();refresh();setInterval(refresh,5000);
+</script></main></body></html>
