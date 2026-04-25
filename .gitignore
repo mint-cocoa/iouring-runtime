@@ -4,3 +4,8 @@ benchmark-results/
 .DS_Store
 __pycache__/
 *.pyc
+/config
+*.kubeconfig
+*.pem
+*.key
+*.p12
