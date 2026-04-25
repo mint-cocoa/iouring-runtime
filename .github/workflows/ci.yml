@@ -59,14 +59,17 @@ jobs:
           project(iouring_runtime_smoke LANGUAGES CXX)
           find_package(iouring_runtime CONFIG REQUIRED)
           add_executable(smoke main.cpp)
+          target_compile_features(smoke PRIVATE cxx_std_23)
           target_link_libraries(smoke PRIVATE iouring_runtime::Runtime)
           EOF
           cat > smoke/main.cpp <<'EOF'
           #include <iouring_runtime/core/IoRing.h>
 
           int main() {
-              iouring_runtime::core::ring::IoRing ring(64);
-              return ring.Size() > 0 ? 0 : 1;
+              iouring_runtime::core::ring::IoRingConfig cfg;
+              cfg.queue_depth = 64;
+              auto ring = iouring_runtime::core::ring::IoRing::Create(cfg);
+              return ring ? 0 : 1;
           }
           EOF
           cmake -S smoke -B smoke/build -G Ninja -DCMAKE_PREFIX_PATH="$PWD/install"
