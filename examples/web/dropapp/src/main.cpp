@@ -118,6 +118,41 @@ std::string UrlEncode(std::string_view text) {
     return out.str();
 }
 
+int HexValue(char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return ch - 'A' + 10;
+    }
+    return -1;
+}
+
+std::optional<std::string> UrlDecode(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '%') {
+            out += text[i];
+            continue;
+        }
+        if (i + 2 >= text.size()) {
+            return std::nullopt;
+        }
+        const int hi = HexValue(text[i + 1]);
+        const int lo = HexValue(text[i + 2]);
+        if (hi < 0 || lo < 0) {
+            return std::nullopt;
+        }
+        out += static_cast<char>((hi << 4) | lo);
+        i += 2;
+    }
+    return out;
+}
+
 std::string ReadFile(std::string_view path) {
     std::ifstream file{std::string(path), std::ios::binary};
     if (!file) {
@@ -235,7 +270,8 @@ std::string SanitizeFilename(std::string_view raw) {
     std::string out;
     out.reserve(std::min<std::size_t>(value.size(), 160));
     for (const unsigned char ch : value) {
-        if (std::isalnum(ch) || ch == '.' || ch == '-' || ch == '_' || ch == ' ') {
+        if (std::isalnum(ch) || ch == '.' || ch == '-' || ch == '_' || ch == ' ' ||
+            ch >= 0x80) {
             out += static_cast<char>(ch);
         } else {
             out += '_';
@@ -254,6 +290,34 @@ std::string SanitizeFilename(std::string_view raw) {
         return "file";
     }
     return out;
+}
+
+std::string AsciiFilenameFallback(std::string_view raw) {
+    const auto sanitized = SanitizeFilename(raw);
+    std::string out;
+    out.reserve(sanitized.size());
+    for (const unsigned char ch : sanitized) {
+        if (std::isalnum(ch) || ch == '.' || ch == '-' || ch == '_' || ch == ' ') {
+            out += static_cast<char>(ch);
+        } else {
+            out += '_';
+        }
+    }
+    if (out.empty() || out == "." || out == "..") {
+        return "file";
+    }
+    return out;
+}
+
+std::string FilenameFromHeaders(const RequestContext& ctx) {
+    const auto encoded = ctx.request.GetHeader("X-Dropapp-Filename-Encoded");
+    if (!encoded.empty()) {
+        if (auto decoded = UrlDecode(encoded)) {
+            return SanitizeFilename(*decoded);
+        }
+        return "file";
+    }
+    return SanitizeFilename(ctx.request.GetHeader("X-Dropapp-Filename"));
 }
 
 bool SafeId(std::string_view id) {
@@ -740,7 +804,7 @@ function auth(){return token.value?{'Authorization':'Bearer '+token.value}:{}}
 function size(n){const u=['B','KiB','MiB','GiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]}
 function setProgress(p,label,extra){progress.style.display='block';fill.style.width=Math.max(0,Math.min(100,p))+'%';state.textContent=label;detail.textContent=extra||''}
 async function refresh(){const r=await fetch('/api/files');const files=await r.json();rows.innerHTML='';summary.textContent=files.length+' active file'+(files.length===1?'':'s');for(const f of files){const tr=document.createElement('tr');const expires=new Date(f.expires_at*1000);tr.innerHTML=`<td class="name"><a href="${f.url}">${f.filename}</a></td><td class="right">${size(f.size)}</td><td class="muted hide-sm">${expires.toLocaleString()}</td><td><div class="actions"><button class="copy">Copy</button><button class="danger">Delete</button></div></td>`;tr.querySelector('.copy').onclick=async()=>{await navigator.clipboard.writeText(location.origin+f.url)};tr.querySelector('.danger').onclick=async()=>{await fetch('/api/files/'+encodeURIComponent(f.id),{method:'DELETE',headers:auth()});refresh()};rows.appendChild(tr)}if(!files.length){rows.innerHTML='<tr><td colspan="4" class="muted">No active files.</td></tr>'}}
-function uploadFile(f){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();const started=performance.now();xhr.open('POST','/api/files');xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.setRequestHeader('X-Dropapp-Filename',f.name);for(const [k,v] of Object.entries(auth()))xhr.setRequestHeader(k,v);xhr.upload.onprogress=e=>{const sent=e.loaded||0,total=e.lengthComputable?e.total:f.size;const pct=total?sent*100/total:0;const seconds=Math.max((performance.now()-started)/1000,.001);setProgress(pct,'Uploading '+pct.toFixed(1)+'%',`${size(sent)} / ${size(total)} | ${size(sent/seconds)}/s`)};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300){const meta=JSON.parse(xhr.responseText);setProgress(100,'Complete',meta.filename);resolve(meta)}else{reject(new Error(xhr.responseText||('HTTP '+xhr.status)))}};xhr.onerror=()=>reject(new Error('Network error'));xhr.onabort=()=>reject(new Error('Upload aborted'));xhr.send(f)})}
+function uploadFile(f){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();const started=performance.now();xhr.open('POST','/api/files');xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.setRequestHeader('X-Dropapp-Filename-Encoded',encodeURIComponent(f.name));for(const [k,v] of Object.entries(auth()))xhr.setRequestHeader(k,v);xhr.upload.onprogress=e=>{const sent=e.loaded||0,total=e.lengthComputable?e.total:f.size;const pct=total?sent*100/total:0;const seconds=Math.max((performance.now()-started)/1000,.001);setProgress(pct,'Uploading '+pct.toFixed(1)+'%',`${size(sent)} / ${size(total)} | ${size(sent/seconds)}/s`)};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300){const meta=JSON.parse(xhr.responseText);setProgress(100,'Complete',meta.filename);resolve(meta)}else{reject(new Error(xhr.responseText||('HTTP '+xhr.status)))}};xhr.onerror=()=>reject(new Error('Network error'));xhr.onabort=()=>reject(new Error('Upload aborted'));xhr.send(f)})}
 upload.onclick=async()=>{const f=file.files[0];if(!f)return;upload.disabled=true;setProgress(0,'Starting',f.name);try{await uploadFile(f);file.value='';await refresh()}catch(e){setProgress(0,'Failed',e.message)}finally{upload.disabled=false}};
 refresh();setInterval(refresh,30000);
 </script></main></body></html>)HTML";
@@ -784,7 +848,8 @@ void SendFile(RequestContext& ctx, DropStore& store, std::uint32_t chunk_bytes) 
     ctx.response.ContentType(MimeType(meta->filename))
         .Header("Content-Length", std::to_string(size))
         .Header("Content-Disposition",
-                "attachment; filename=\"" + JsonEscape(meta->filename) + "\"")
+                "attachment; filename=\"" + JsonEscape(AsciiFilenameFallback(meta->filename)) +
+                    "\"; filename*=UTF-8''" + UrlEncode(meta->filename))
         .Send();
     if (ctx.request.method == HttpMethod::kHead) {
         return;
@@ -939,7 +1004,7 @@ int main() {
                 SendText(ctx, HttpStatus::kPayloadTooLarge, "Payload Too Large");
                 return false;
             }
-            const auto filename = SanitizeFilename(ctx.request.GetHeader("X-Dropapp-Filename"));
+            const auto filename = FilenameFromHeaders(ctx);
             const auto id = GenerateId();
             const auto now = UnixSeconds();
 

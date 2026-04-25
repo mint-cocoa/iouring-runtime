@@ -6,7 +6,8 @@
 - `GET /healthz` returns `ok`.
 - `GET /api/files` lists non-expired files.
 - `POST /api/files` streams a raw request body to storage. The original
-  filename is read from `X-Dropapp-Filename`.
+  filename is read from `X-Dropapp-Filename`, or from percent-encoded UTF-8 in
+  `X-Dropapp-Filename-Encoded`.
 - `GET /d/:id/*filename` downloads a stored file.
 - `DELETE /api/files/:id` removes a stored file.
 
