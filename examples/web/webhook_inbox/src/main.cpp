@@ -416,6 +416,14 @@ public:
         std::string line;
         std::scoped_lock lock(mu_);
         while (std::getline(in, line)) {
+            if (auto deleted_id = ExtractJsonString(line, "deleted_id")) {
+                by_id_.erase(std::remove_if(by_id_.begin(), by_id_.end(),
+                                            [&](const EventRecord& record) {
+                                                return record.event.id == *deleted_id;
+                                            }),
+                             by_id_.end());
+                continue;
+            }
             auto parsed = ParseEvent(line);
             if (!parsed) {
                 continue;
@@ -505,7 +513,15 @@ public:
                          return record.event.id == id;
                      }),
                      by_id_.end());
-        return by_id_.size() != before;
+        if (by_id_.size() == before) {
+            return false;
+        }
+        std::ofstream out(log_path_, std::ios::binary | std::ios::app);
+        if (out) {
+            out << "{\"deleted_id\":\"" << JsonEscape(id)
+                << "\",\"deleted_at\":" << UnixSeconds() << "}\n";
+        }
+        return true;
     }
 
     void CleanupExpired() {
