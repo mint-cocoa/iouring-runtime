@@ -1,18 +1,27 @@
 # webhook_inbox
 
-`webhook_inbox` is a small HTTP webhook capture app backed by
-`iouring_runtime_web`.
+`webhook_inbox` is a small operations event inbox backed by
+`iouring_runtime_web`. It captures GitHub Actions, Argo CD, and homelab service
+webhooks, persists them to an append-only JSONL log, and keeps a recent
+in-memory index for the UI.
 
 - `GET /` serves a single-page browser UI.
 - `GET /healthz` returns `ok`.
-- `POST|PUT|PATCH /hook/:inbox` captures a webhook request.
-- `POST|PUT|PATCH /hook/:inbox/*path` captures a webhook request with a path.
-- `GET /api/events?inbox=<name>` lists non-expired events.
+- `POST /hooks/github` captures a GitHub webhook.
+- `POST /hooks/argocd` captures an Argo CD webhook.
+- `POST|PUT|PATCH /hook/:inbox` captures a generic webhook request.
+- `POST|PUT|PATCH /hook/:inbox/*path` captures a generic webhook request with a path.
+- `GET /api/events?service=<name>&q=<text>&limit=<n>` lists recent events.
 - `GET /api/events/:id` returns metadata, headers, and body.
 - `DELETE /api/events/:id` removes an event.
 
 `WEBHOOK_INBOX_AUTH_TOKEN` protects API reads and deletes when set. Capture
 endpoints remain public so external webhook providers can reach them.
+
+Events are appended to `${WEBHOOK_INBOX_ROOT}/events.jsonl`. The app derives
+common fields such as `service`, `event_type`, `status`, `source`, and
+`message` without an external JSON library; the raw body and headers are still
+stored for inspection.
 
 For local testing:
 
@@ -29,6 +38,7 @@ Example capture:
 ```bash
 curl -X POST \
   -H 'Content-Type: application/json' \
-  --data '{"event":"ping"}' \
-  http://127.0.0.1:3000/hook/default
+  -H 'X-GitHub-Event: workflow_run' \
+  --data '{"repository":{"full_name":"mint-cocoa/iouring-runtime"},"status":"completed","conclusion":"success"}' \
+  http://127.0.0.1:3000/hooks/github
 ```

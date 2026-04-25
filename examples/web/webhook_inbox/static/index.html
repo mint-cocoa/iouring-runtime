@@ -17,6 +17,7 @@ h1{font-size:18px;line-height:1.2;margin:0;letter-spacing:0}.subtitle{font-size:
 .workspace{display:grid;grid-template-columns:292px minmax(360px,520px) minmax(0,1fr);gap:1px;background:var(--line);border-top:1px solid var(--line)}
 .side,.stream,.inspect{min-width:0;background:var(--surface);min-height:calc(100vh - 64px)}
 .side{padding:16px;display:flex;flex-direction:column;gap:18px}.block{display:grid;gap:9px}.label{font-size:12px;font-weight:700;color:#465160;text-transform:uppercase}
+.filters{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.chip{background:#fff;color:#465160;border-color:var(--line);padding:8px}.chip.active{background:var(--accent);color:white;border-color:var(--accent)}
 .endpoint{display:grid;grid-template-columns:1fr auto;gap:8px}.endpoint input{background:#f8fafc}.hint{font-size:12px;line-height:1.45;color:var(--muted)}
 .sample{margin:0;border-radius:6px;background:var(--code);color:#d0d5dd;padding:12px;overflow:auto;font-size:12px;line-height:1.5}
 .stream{display:grid;grid-template-rows:auto 1fr}.stream-head,.inspect-head{padding:14px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -34,19 +35,27 @@ h2{font-size:13px;margin:0;text-transform:uppercase;color:#465160}.event-list{ov
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="brand"><div class="mark"></div><div><h1>webhook inbox</h1><div class="subtitle">Live HTTP event capture and payload inspection</div></div></div>
+    <div class="brand"><div class="mark"></div><div><h1>event inbox</h1><div class="subtitle">GitHub Actions, Argo CD, and homelab service events</div></div></div>
     <div id="summary" class="status">waiting for events</div>
   </header>
   <main class="workspace">
     <aside class="side">
       <div class="block">
-        <div class="label">Inbox</div>
-        <input id="inbox" value="default" placeholder="default">
-        <div class="hint">Use one inbox name per integration or test run.</div>
+        <div class="label">Service</div>
+        <div class="filters">
+          <button class="chip active" data-service="">All</button>
+          <button class="chip" data-service="github">GitHub</button>
+          <button class="chip" data-service="argocd">Argo CD</button>
+        </div>
+        <div class="hint">Capture CI, GitOps, and service lifecycle events in one recent timeline.</div>
       </div>
       <div class="block">
         <div class="label">Capture URL</div>
         <div class="endpoint"><input id="endpoint" class="mono" readonly><button id="copy">Copy</button></div>
+      </div>
+      <div class="block">
+        <div class="label">Search</div>
+        <input id="query" placeholder="repo, app, status, event">
       </div>
       <div class="block">
         <div class="label">Read Token</div>
@@ -70,18 +79,18 @@ h2{font-size:13px;margin:0;text-transform:uppercase;color:#465160}.event-list{ov
   </main>
 </div>
 <script>
-const inbox=document.getElementById('inbox'),endpoint=document.getElementById('endpoint'),token=document.getElementById('token'),copy=document.getElementById('copy'),rows=document.getElementById('rows'),summary=document.getElementById('summary'),sample=document.getElementById('sample'),refreshButton=document.getElementById('refresh'),payload=document.getElementById('payload'),eventSummary=document.getElementById('eventSummary'),deleteButton=document.getElementById('delete'),bodyTab=document.getElementById('bodyTab'),headersTab=document.getElementById('headersTab');
-let selected='',currentBody='',currentHeaders='';
+const endpoint=document.getElementById('endpoint'),query=document.getElementById('query'),token=document.getElementById('token'),copy=document.getElementById('copy'),rows=document.getElementById('rows'),summary=document.getElementById('summary'),sample=document.getElementById('sample'),refreshButton=document.getElementById('refresh'),payload=document.getElementById('payload'),eventSummary=document.getElementById('eventSummary'),deleteButton=document.getElementById('delete'),bodyTab=document.getElementById('bodyTab'),headersTab=document.getElementById('headersTab'),chips=[...document.querySelectorAll('.chip')];
+let selected='',currentBody='',currentHeaders='',service='';
 function auth(){return token.value?{'Authorization':'Bearer '+token.value}:{}}
 function size(n){const u=['B','KiB','MiB','GiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]}
-function safeInbox(){return (inbox.value||'default').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'')||'default'}
-function syncEndpoint(){const url=location.origin+'/hook/'+safeInbox();endpoint.value=url;sample.textContent=`curl -X POST ${url} \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"event\":\"ping\"}'`}
+function syncEndpoint(){const target=service||'github';const url=location.origin+'/hooks/'+target;endpoint.value=url;if(target==='argocd'){sample.textContent=`curl -X POST ${url} \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"appName\":\"dropapp\",\"eventType\":\"sync\",\"phase\":\"Succeeded\"}'`}else{sample.textContent=`curl -X POST ${url} \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-GitHub-Event: workflow_run' \\\n  -d '{\"repository\":{\"full_name\":\"mint-cocoa/home\"},\"status\":\"completed\"}'`}}
 function showTab(which){bodyTab.classList.toggle('active',which==='body');headersTab.classList.toggle('active',which==='headers');payload.textContent=which==='body'?currentBody:currentHeaders}
-async function refresh(){syncEndpoint();const r=await fetch('/api/events?inbox='+encodeURIComponent(safeInbox()),{headers:auth()});if(r.status===401){rows.innerHTML='<div class="empty">Token required for event listing.</div>';summary.textContent='token required';return}if(!r.ok){rows.innerHTML='<div class="empty">'+await r.text()+'</div>';return}const events=await r.json();summary.textContent=events.length+' captured event'+(events.length===1?'':'s');rows.innerHTML='';for(const e of events){const div=document.createElement('div');div.className='event'+(e.id===selected?' selected':'');const path='/hook/'+e.inbox+(e.path==='/'?'':e.path);div.innerHTML=`<div class="method"></div><div><div class="path"></div><div class="meta"></div></div><div class="size"></div>`;div.querySelector('.method').textContent=e.method;div.querySelector('.path').textContent=path;div.querySelector('.meta').textContent=(e.content_type||'no content type')+' | '+new Date(e.received_at*1000).toLocaleTimeString();div.querySelector('.size').textContent=size(e.size);div.onclick=()=>load(e.id);rows.appendChild(div)}if(!events.length){rows.innerHTML='<div class="empty">No events in this inbox yet.</div>'}}
-async function load(id){selected=id;const r=await fetch('/api/events/'+encodeURIComponent(id),{headers:auth()});if(!r.ok){payload.textContent=await r.text();return}const data=await r.json(),e=data.event,path='/hook/'+e.inbox+(e.path==='/'?'':e.path);currentHeaders=e.headers.map(h=>h.name+': '+h.value).join('\n')||'No captured headers.';currentBody=data.body||'';eventSummary.innerHTML='<div class="summary-main"><span class="pill"></span><div class="url"></div></div><div class="muted"></div>';eventSummary.querySelector('.pill').textContent=e.method;eventSummary.querySelector('.url').textContent=path;eventSummary.querySelector('.muted').textContent=new Date(e.received_at*1000).toLocaleString()+' | '+size(e.size)+' | '+e.remote_addr;deleteButton.classList.remove('hide');showTab('body');refresh()}
+async function refresh(){syncEndpoint();const params=new URLSearchParams({limit:'100'});if(service)params.set('service',service);if(query.value.trim())params.set('q',query.value.trim());const r=await fetch('/api/events?'+params,{headers:auth()});if(r.status===401){rows.innerHTML='<div class="empty">Token required for event listing.</div>';summary.textContent='token required';return}if(!r.ok){rows.innerHTML='<div class="empty">'+await r.text()+'</div>';return}const events=await r.json();summary.textContent=events.length+' recent event'+(events.length===1?'':'s');rows.innerHTML='';for(const e of events){const div=document.createElement('div');div.className='event'+(e.id===selected?' selected':'');div.innerHTML=`<div class="method"></div><div><div class="path"></div><div class="meta"></div></div><div class="size"></div>`;div.querySelector('.method').textContent=e.service||e.inbox;div.querySelector('.path').textContent=(e.source||e.event_type||'event')+' · '+(e.status||'received');div.querySelector('.meta').textContent=(e.event_type||'webhook')+' | '+(e.message||'no message')+' | '+new Date(e.received_at*1000).toLocaleTimeString();div.querySelector('.size').textContent=size(e.size);div.onclick=()=>load(e.id);rows.appendChild(div)}if(!events.length){rows.innerHTML='<div class="empty">No matching events yet.</div>'}}
+async function load(id){selected=id;const r=await fetch('/api/events/'+encodeURIComponent(id),{headers:auth()});if(!r.ok){payload.textContent=await r.text();return}const data=await r.json(),e=data.event,path='/hooks/'+e.service+(e.path==='/'?'':e.path);currentHeaders=e.headers.map(h=>h.name+': '+h.value).join('\n')||'No captured headers.';currentBody=data.body||'';eventSummary.innerHTML='<div class="summary-main"><span class="pill"></span><div class="url"></div></div><div class="muted"></div>';eventSummary.querySelector('.pill').textContent=e.service;eventSummary.querySelector('.url').textContent=(e.source||path)+' · '+(e.status||'received');eventSummary.querySelector('.muted').textContent=(e.event_type||'webhook')+' | '+new Date(e.received_at*1000).toLocaleString()+' | '+size(e.size)+' | '+e.remote_addr;deleteButton.classList.remove('hide');showTab('body');refresh()}
 copy.onclick=async()=>{syncEndpoint();await navigator.clipboard.writeText(endpoint.value)}
 deleteButton.onclick=async()=>{if(!selected)return;await fetch('/api/events/'+encodeURIComponent(selected),{method:'DELETE',headers:auth()});selected='';currentBody='';currentHeaders='';deleteButton.classList.add('hide');eventSummary.innerHTML='<div class="muted">Select an event to inspect headers and body.</div>';payload.textContent='No event selected.';refresh()}
-bodyTab.onclick=()=>showTab('body');headersTab.onclick=()=>showTab('headers');refreshButton.onclick=refresh;inbox.oninput=refresh;token.oninput=refresh;syncEndpoint();refresh();setInterval(refresh,5000);
+chips.forEach(chip=>chip.onclick=()=>{service=chip.dataset.service;chips.forEach(c=>c.classList.toggle('active',c===chip));refresh()});
+bodyTab.onclick=()=>showTab('body');headersTab.onclick=()=>showTab('headers');refreshButton.onclick=refresh;query.oninput=refresh;token.oninput=refresh;syncEndpoint();refresh();setInterval(refresh,5000);
 </script>
 </body>
 </html>

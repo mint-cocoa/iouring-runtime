@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <initializer_list>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -33,6 +34,12 @@ constexpr std::uint64_t kDefaultTtlSeconds = 86400;
 struct WebhookEvent {
     std::string id;
     std::string inbox;
+    std::string service;
+    std::string event_type;
+    std::string status;
+    std::string source;
+    std::string message;
+    std::string delivery_id;
     std::string method;
     std::string path;
     std::string query;
@@ -81,15 +88,6 @@ std::string ReadFile(std::string_view path) {
     std::ostringstream out;
     out << file.rdbuf();
     return out.str();
-}
-
-bool WriteFile(const std::filesystem::path& path, std::string_view body) {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return false;
-    }
-    out.write(body.data(), static_cast<std::streamsize>(body.size()));
-    return static_cast<bool>(out);
 }
 
 int HexValue(char ch) {
@@ -177,6 +175,16 @@ std::optional<std::uint64_t> ExtractJsonUint(std::string_view json,
     return any ? std::optional<std::uint64_t>(value) : std::nullopt;
 }
 
+std::string FirstPresentJsonString(std::string_view json,
+                                   std::initializer_list<std::string_view> keys) {
+    for (const auto key : keys) {
+        if (auto value = ExtractJsonString(json, key)) {
+            return *value;
+        }
+    }
+    return {};
+}
+
 std::string SafeName(std::string_view raw, std::string_view fallback) {
     std::string out;
     out.reserve(std::min<std::size_t>(raw.size(), 80));
@@ -229,10 +237,17 @@ std::string HeadersJson(const RequestContext& ctx) {
 }
 
 std::string EventJson(const WebhookEvent& event,
-                      std::string_view headers_json = "[]") {
+                      std::string_view headers_json = "[]",
+                      std::optional<std::string_view> body = std::nullopt) {
     std::ostringstream out;
     out << "{\"id\":\"" << JsonEscape(event.id)
         << "\",\"inbox\":\"" << JsonEscape(event.inbox)
+        << "\",\"service\":\"" << JsonEscape(event.service)
+        << "\",\"event_type\":\"" << JsonEscape(event.event_type)
+        << "\",\"status\":\"" << JsonEscape(event.status)
+        << "\",\"source\":\"" << JsonEscape(event.source)
+        << "\",\"message\":\"" << JsonEscape(event.message)
+        << "\",\"delivery_id\":\"" << JsonEscape(event.delivery_id)
         << "\",\"method\":\"" << JsonEscape(event.method)
         << "\",\"path\":\"" << JsonEscape(event.path)
         << "\",\"query\":\"" << JsonEscape(event.query)
@@ -241,13 +256,23 @@ std::string EventJson(const WebhookEvent& event,
         << "\",\"size\":" << event.size
         << ",\"received_at\":" << event.received_at
         << ",\"expires_at\":" << event.expires_at
-        << ",\"headers\":" << headers_json << "}";
+        << ",\"headers\":" << headers_json;
+    if (body) {
+        out << ",\"body\":\"" << JsonEscape(*body) << "\"";
+    }
+    out << "}";
     return out.str();
 }
 
 std::optional<WebhookEvent> ParseEvent(std::string_view json) {
     auto id = ExtractJsonString(json, "id");
     auto inbox = ExtractJsonString(json, "inbox");
+    auto service = ExtractJsonString(json, "service");
+    auto event_type = ExtractJsonString(json, "event_type");
+    auto status = ExtractJsonString(json, "status");
+    auto source = ExtractJsonString(json, "source");
+    auto message = ExtractJsonString(json, "message");
+    auto delivery_id = ExtractJsonString(json, "delivery_id");
     auto method = ExtractJsonString(json, "method");
     auto path = ExtractJsonString(json, "path");
     auto query = ExtractJsonString(json, "query");
@@ -262,6 +287,12 @@ std::optional<WebhookEvent> ParseEvent(std::string_view json) {
     }
     return WebhookEvent{.id = std::move(*id),
                         .inbox = std::move(*inbox),
+                        .service = service.value_or(*inbox),
+                        .event_type = event_type.value_or("webhook"),
+                        .status = status.value_or("received"),
+                        .source = source.value_or(""),
+                        .message = message.value_or(""),
+                        .delivery_id = delivery_id.value_or(""),
                         .method = std::move(*method),
                         .path = std::move(*path),
                         .query = std::move(*query),
@@ -270,6 +301,84 @@ std::optional<WebhookEvent> ParseEvent(std::string_view json) {
                         .size = *size,
                         .received_at = static_cast<std::int64_t>(*received_at),
                         .expires_at = static_cast<std::int64_t>(*expires_at)};
+}
+
+std::string Truncate(std::string value, std::size_t max_size) {
+    if (value.size() <= max_size) {
+        return value;
+    }
+    value.resize(max_size);
+    value += "...";
+    return value;
+}
+
+std::string HeaderValue(const RequestContext& ctx, std::string_view name) {
+    return std::string(ctx.request.GetHeader(name));
+}
+
+WebhookEvent ClassifyEvent(const RequestContext& ctx,
+                           std::string service,
+                           std::string inbox,
+                           std::uint64_t ttl_seconds) {
+    const auto now = UnixSeconds();
+    const auto body = std::string_view(ctx.request.body);
+    const auto id = GenerateId();
+    const auto path_tail = std::string(ctx.request.Param("path"));
+
+    WebhookEvent event{
+        .id = id,
+        .inbox = std::move(inbox),
+        .service = SafeName(service, "custom"),
+        .event_type = "webhook",
+        .status = "received",
+        .source = "",
+        .message = "",
+        .delivery_id = "",
+        .method = std::string(HttpMethodToString(ctx.request.method)),
+        .path = path_tail.empty() ? "/" : "/" + path_tail,
+        .query = ctx.request.query,
+        .content_type = std::string(ctx.request.ContentType()),
+        .remote_addr = std::string(ctx.remote_addr),
+        .size = ctx.request.body.size(),
+        .received_at = now,
+        .expires_at = now + static_cast<std::int64_t>(ttl_seconds),
+    };
+
+    if (event.service == "github") {
+        event.event_type = HeaderValue(ctx, "X-GitHub-Event");
+        if (event.event_type.empty()) event.event_type = "github";
+        event.delivery_id = HeaderValue(ctx, "X-GitHub-Delivery");
+        event.source = FirstPresentJsonString(body, {"full_name", "name", "repository"});
+        const auto action = FirstPresentJsonString(body, {"action"});
+        const auto ref = FirstPresentJsonString(body, {"ref", "head_branch"});
+        event.status = FirstPresentJsonString(body, {"conclusion", "status", "state"});
+        if (event.status.empty()) event.status = "received";
+        if (!action.empty() && !ref.empty()) {
+            event.message = action + " on " + ref;
+        } else if (!action.empty()) {
+            event.message = action;
+        } else if (!ref.empty()) {
+            event.message = ref;
+        }
+    } else if (event.service == "argocd") {
+        event.event_type = FirstPresentJsonString(body, {"eventType", "type", "reason"});
+        if (event.event_type.empty()) event.event_type = "argocd";
+        event.source = FirstPresentJsonString(body, {"appName", "application", "name"});
+        event.status = FirstPresentJsonString(body, {"phase", "sync_status", "health_status", "status"});
+        if (event.status.empty()) event.status = "received";
+        event.message = FirstPresentJsonString(body, {"message", "summary", "description"});
+    } else {
+        event.event_type = FirstPresentJsonString(body, {"event", "type", "action"});
+        if (event.event_type.empty()) event.event_type = event.service;
+        event.source = FirstPresentJsonString(body, {"source", "app", "name"});
+        event.status = FirstPresentJsonString(body, {"status", "state", "phase"});
+        if (event.status.empty()) event.status = "received";
+        event.message = FirstPresentJsonString(body, {"message", "summary", "description"});
+    }
+
+    event.source = Truncate(event.source, 120);
+    event.message = Truncate(event.message, 240);
+    return event;
 }
 
 std::string MimeType(const std::string& filename) {
@@ -283,124 +392,135 @@ std::string MimeType(const std::string& filename) {
 }
 
 class InboxStore {
+private:
+    struct EventRecord {
+        WebhookEvent event;
+        std::string json;
+    };
+
 public:
     explicit InboxStore(std::filesystem::path root)
         : root_(std::move(root)),
-          events_(root_ / "events"),
-          bodies_(root_ / "bodies") {}
+          log_path_(root_ / "events.jsonl") {}
 
     bool Init() {
         std::error_code ec;
-        std::filesystem::create_directories(events_, ec);
+        std::filesystem::create_directories(root_, ec);
         if (ec) return false;
-        std::filesystem::create_directories(bodies_, ec);
-        return !ec;
+        std::ifstream in(log_path_, std::ios::binary);
+        if (!in) {
+            std::ofstream create(log_path_, std::ios::binary | std::ios::app);
+            return static_cast<bool>(create);
+        }
+
+        std::string line;
+        std::scoped_lock lock(mu_);
+        while (std::getline(in, line)) {
+            auto parsed = ParseEvent(line);
+            if (!parsed) {
+                continue;
+            }
+            by_id_.push_back(EventRecord{.event = std::move(*parsed),
+                                         .json = std::move(line)});
+        }
+        return true;
     }
 
     bool Put(const WebhookEvent& event, std::string_view headers_json,
              std::string_view body) {
+        auto line = EventJson(event, headers_json, body);
         std::scoped_lock lock(mu_);
-        if (!WriteFile(BodyPath(event.id), body)) {
+        std::ofstream out(log_path_, std::ios::binary | std::ios::app);
+        if (!out) {
             return false;
         }
-        if (!WriteFile(EventPath(event.id), EventJson(event, headers_json) + "\n")) {
-            std::error_code ignored;
-            std::filesystem::remove(BodyPath(event.id), ignored);
+        out << line << "\n";
+        if (!out) {
             return false;
         }
+        by_id_.push_back(EventRecord{.event = event, .json = std::move(line)});
         return true;
     }
 
     std::optional<WebhookEvent> Read(std::string_view id) const {
         if (!SafeId(id)) return std::nullopt;
-        auto parsed = ParseEvent(ReadFile(EventPath(id).string()));
-        if (!parsed || parsed->id != id) return std::nullopt;
-        return parsed;
+        std::scoped_lock lock(mu_);
+        for (auto it = by_id_.rbegin(); it != by_id_.rend(); ++it) {
+            if (it->event.id == id && it->event.expires_at > UnixSeconds()) {
+                return it->event;
+            }
+        }
+        return std::nullopt;
     }
 
     std::string ReadEventJson(std::string_view id) const {
         if (!SafeId(id)) return {};
-        return ReadFile(EventPath(id).string());
+        std::scoped_lock lock(mu_);
+        for (auto it = by_id_.rbegin(); it != by_id_.rend(); ++it) {
+            if (it->event.id == id && it->event.expires_at > UnixSeconds()) {
+                return it->json;
+            }
+        }
+        return {};
     }
 
-    std::string ReadBody(std::string_view id) const {
-        if (!SafeId(id)) return {};
-        return ReadFile(BodyPath(id).string());
-    }
-
-    std::vector<WebhookEvent> List(std::string_view inbox) const {
+    std::vector<WebhookEvent> List(std::string_view service,
+                                   std::string_view query,
+                                   std::size_t limit) const {
         std::vector<WebhookEvent> out;
-        const auto safe_inbox = SafeName(inbox, "");
-        std::error_code ec;
-        if (!std::filesystem::exists(events_, ec)) {
-            return out;
+        const auto safe_service = SafeName(service, "");
+        const auto safe_query = SafeName(query, "");
+        const auto now = UnixSeconds();
+        std::scoped_lock lock(mu_);
+        for (auto it = by_id_.rbegin(); it != by_id_.rend(); ++it) {
+            const auto& event = it->event;
+            if (event.expires_at <= now) {
+                continue;
+            }
+            if (!safe_service.empty() && event.service != safe_service) {
+                continue;
+            }
+            if (!safe_query.empty()) {
+                const auto haystack = SafeName(event.service + " " + event.event_type + " " +
+                                                   event.status + " " + event.source + " " +
+                                                   event.message,
+                                               "");
+                if (haystack.find(safe_query) == std::string::npos) {
+                    continue;
+                }
+            }
+            out.push_back(event);
+            if (out.size() >= limit) {
+                break;
+            }
         }
-        for (const auto& entry : std::filesystem::directory_iterator(events_, ec)) {
-            if (ec || !entry.is_regular_file(ec) || entry.path().extension() != ".json") {
-                continue;
-            }
-            auto parsed = ParseEvent(ReadFile(entry.path().string()));
-            if (!parsed || parsed->expires_at <= UnixSeconds()) {
-                continue;
-            }
-            if (!safe_inbox.empty() && parsed->inbox != safe_inbox) {
-                continue;
-            }
-            out.push_back(std::move(*parsed));
-        }
-        std::sort(out.begin(), out.end(), [](const WebhookEvent& a, const WebhookEvent& b) {
-            return a.received_at > b.received_at;
-        });
         return out;
     }
 
     bool Remove(std::string_view id) {
         if (!SafeId(id)) return false;
         std::scoped_lock lock(mu_);
-        std::error_code ec1;
-        std::error_code ec2;
-        const auto removed_event = std::filesystem::remove(EventPath(id), ec1);
-        const auto removed_body = std::filesystem::remove(BodyPath(id), ec2);
-        return (removed_event || removed_body) && !ec1 && !ec2;
+        const auto before = by_id_.size();
+        by_id_.erase(std::remove_if(by_id_.begin(), by_id_.end(), [&](const EventRecord& record) {
+                         return record.event.id == id;
+                     }),
+                     by_id_.end());
+        return by_id_.size() != before;
     }
 
     void CleanupExpired() {
         std::scoped_lock lock(mu_);
-        std::error_code ec;
-        if (!std::filesystem::exists(events_, ec)) {
-            return;
-        }
         const auto now = UnixSeconds();
-        for (const auto& entry : std::filesystem::directory_iterator(events_, ec)) {
-            if (ec || !entry.is_regular_file(ec) || entry.path().extension() != ".json") {
-                continue;
-            }
-            auto parsed = ParseEvent(ReadFile(entry.path().string()));
-            if (!parsed || parsed->expires_at > now) {
-                continue;
-            }
-            std::error_code ignored;
-            std::filesystem::remove(BodyPath(parsed->id), ignored);
-            std::filesystem::remove(entry.path(), ignored);
-        }
+        by_id_.erase(std::remove_if(by_id_.begin(), by_id_.end(), [&](const EventRecord& record) {
+                         return record.event.expires_at <= now;
+                     }),
+                     by_id_.end());
     }
 
 private:
-    std::filesystem::path EventPath(std::string_view id) const {
-        auto path = events_ / std::string(id);
-        path += ".json";
-        return path;
-    }
-
-    std::filesystem::path BodyPath(std::string_view id) const {
-        auto path = bodies_ / std::string(id);
-        path += ".body";
-        return path;
-    }
-
     std::filesystem::path root_;
-    std::filesystem::path events_;
-    std::filesystem::path bodies_;
+    std::filesystem::path log_path_;
+    std::vector<EventRecord> by_id_;
     mutable std::mutex mu_;
 };
 
@@ -516,25 +636,13 @@ void ServeStaticFile(RequestContext& ctx,
 }
 
 void CaptureWebhook(RequestContext& ctx, InboxStore& store,
-                    std::uint64_t ttl_seconds) {
+                    std::uint64_t ttl_seconds,
+                    std::string_view service,
+                    std::string_view inbox) {
     store.CleanupExpired();
-    const auto inbox = SafeName(ctx.request.Param("inbox"), "default");
-    const auto id = GenerateId();
-    const auto now = UnixSeconds();
-    const auto path_tail = std::string(ctx.request.Param("path"));
-
-    WebhookEvent event{
-        .id = id,
-        .inbox = inbox,
-        .method = std::string(HttpMethodToString(ctx.request.method)),
-        .path = path_tail.empty() ? "/" : "/" + path_tail,
-        .query = ctx.request.query,
-        .content_type = std::string(ctx.request.ContentType()),
-        .remote_addr = std::string(ctx.remote_addr),
-        .size = ctx.request.body.size(),
-        .received_at = now,
-        .expires_at = now + static_cast<std::int64_t>(ttl_seconds),
-    };
+    const auto safe_service = SafeName(service, "custom");
+    const auto safe_inbox = SafeName(inbox, safe_service);
+    auto event = ClassifyEvent(ctx, safe_service, safe_inbox, ttl_seconds);
 
     if (!store.Put(event, HeadersJson(ctx), ctx.request.body)) {
         SendText(ctx, HttpStatus::kInternalServerError, "store failed");
@@ -542,7 +650,11 @@ void CaptureWebhook(RequestContext& ctx, InboxStore& store,
     }
 
     ctx.response.Status(HttpStatus::kCreated)
-        .Json("{\"id\":\"" + JsonEscape(id) + "\",\"inbox\":\"" + JsonEscape(inbox) +
+        .Json("{\"id\":\"" + JsonEscape(event.id) +
+              "\",\"service\":\"" + JsonEscape(event.service) +
+              "\",\"event_type\":\"" + JsonEscape(event.event_type) +
+              "\",\"status\":\"" + JsonEscape(event.status) +
+              "\",\"source\":\"" + JsonEscape(event.source) +
               "\",\"size\":" + std::to_string(event.size) + "}")
         .Send();
 }
@@ -553,8 +665,18 @@ void ListEvents(RequestContext& ctx, InboxStore& store, std::string_view token) 
         return;
     }
     store.CleanupExpired();
-    const auto inbox = ctx.request.QueryParam("inbox");
-    const auto events = store.List(inbox);
+    const auto service = ctx.request.QueryParam("service");
+    const auto query = ctx.request.QueryParam("q");
+    const auto limit_value = ctx.request.QueryParam("limit");
+    std::size_t limit = 100;
+    if (!limit_value.empty()) {
+        try {
+            limit = std::clamp<std::size_t>(std::stoull(std::string(limit_value)), 1, 500);
+        } catch (...) {
+            limit = 100;
+        }
+    }
+    const auto events = store.List(service, query, limit);
     std::ostringstream json;
     json << "[";
     bool first = true;
@@ -583,8 +705,9 @@ void GetEvent(RequestContext& ctx, InboxStore& store, std::string_view token) {
            (event_json.back() == '\n' || event_json.back() == '\r')) {
         event_json.pop_back();
     }
+    const auto body = ExtractJsonString(event_json, "body").value_or("");
     ctx.response.Json("{\"event\":" + event_json + ",\"body\":\"" +
-                      JsonEscape(store.ReadBody(id)) + "\"}")
+                      JsonEscape(body) + "\"}")
         .Send();
 }
 
@@ -604,15 +727,26 @@ void DeleteEvent(RequestContext& ctx, InboxStore& store, std::string_view token)
 void RegisterCaptureRoutes(iouring_runtime::web::WebServer& server,
                            InboxStore& store,
                            std::uint64_t ttl_seconds) {
-    auto capture = [&store, ttl_seconds](RequestContext& ctx) {
-        CaptureWebhook(ctx, store, ttl_seconds);
+    auto github = [&store, ttl_seconds](RequestContext& ctx) {
+        CaptureWebhook(ctx, store, ttl_seconds, "github", "github");
     };
-    server.Post("/hook/:inbox", capture);
-    server.Post("/hook/:inbox/*path", capture);
-    server.Put("/hook/:inbox", capture);
-    server.Put("/hook/:inbox/*path", capture);
-    server.Route(HttpMethod::kPatch, "/hook/:inbox", capture);
-    server.Route(HttpMethod::kPatch, "/hook/:inbox/*path", capture);
+    auto argocd = [&store, ttl_seconds](RequestContext& ctx) {
+        CaptureWebhook(ctx, store, ttl_seconds, "argocd", "argocd");
+    };
+    auto generic = [&store, ttl_seconds](RequestContext& ctx) {
+        CaptureWebhook(ctx, store, ttl_seconds, ctx.request.Param("inbox"),
+                       ctx.request.Param("inbox"));
+    };
+    server.Post("/hooks/github", github);
+    server.Post("/hooks/github/*path", github);
+    server.Post("/hooks/argocd", argocd);
+    server.Post("/hooks/argocd/*path", argocd);
+    server.Post("/hook/:inbox", generic);
+    server.Post("/hook/:inbox/*path", generic);
+    server.Put("/hook/:inbox", generic);
+    server.Put("/hook/:inbox/*path", generic);
+    server.Route(HttpMethod::kPatch, "/hook/:inbox", generic);
+    server.Route(HttpMethod::kPatch, "/hook/:inbox/*path", generic);
 }
 
 } // namespace
