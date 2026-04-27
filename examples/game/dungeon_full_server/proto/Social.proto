@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package game;
+
+import "Common.proto";
+import "Enum.proto";
+
+// 301: 채팅 메시지 전송 (C→S)
+message C_Chat {
+  ChatType chat_type   = 1;
+  string   message     = 2;
+  string   target_name = 3;  // CHAT_WHISPER 시 대상 이름
+}
+
+// 302: 채팅 메시지 수신 (S→C)
+message S_Chat {
+  ChatType chat_type   = 1;
+  uint64   sender_id   = 2;
+  string   sender_name = 3;
+  string   message     = 4;
+  string   target_name = 5;  // CHAT_WHISPER 시 대상 이름
+}
+
+// 303: 파티 생성 (C→S)
+message C_CreateParty {
+}
+
+// 304: 파티 생성 응답 (S→C)
+message S_CreateParty {
+  bool   success  = 1;
+  uint64 party_id = 2;
+}
+
+// 305: 파티 참가 (C→S)
+message C_JoinParty {
+  uint64 party_id = 1;
+}
+
+// 306: 파티 참가 응답 (S→C)
+message S_JoinParty {
+  bool   success  = 1;
+  uint64 party_id = 2;
+}
+
+// 307: 파티 탈퇴 (C→S)
+message C_LeaveParty {
+}
+
+// 308: 파티 탈퇴 응답 (S→C)
+message S_LeaveParty {
+  bool success = 1;
+}
+
+// 309: 파티 멤버 목록 동기화 (S→C)
+message S_PartyUpdate {
+  uint64                  party_id  = 1;
+  uint64                  leader_id = 2;
+  repeated PartyMemberInfo members  = 3;
+}

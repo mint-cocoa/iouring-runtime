@@ -15,13 +15,49 @@ The runtime owns:
 - queueing and backpressure
 - job queues and timers
 
-The runtime does not own:
+The core runtime target does not own:
 
 - HTTP
 - WebSocket
 - packet schemas
 - storage
 - application-domain logic
+
+HTTP, TCP proxy, multiplayer packet, and observability code now live as
+optional modules in the same repository. They build on the runtime core
+without changing the default runtime package boundary.
+
+## Source Layout
+
+- `include/iouring_runtime/core/`
+  public runtime API
+- `include/iouring_runtime/web/`
+  optional HTTP API
+- `include/iouring_runtime/proxy/`
+  optional TCP proxy API
+- `include/iouring_runtime/game/`
+  optional multiplayer packet, player registry, and room API
+- `include/iouring_runtime/observability/`
+  logging and profiling helpers
+- `src/runtime/ring/`
+  `io_uring` wrapper and buffer-ring support
+- `src/runtime/io/`
+  listener and session lifecycle implementation
+- `src/runtime/job/`
+  job queues and timers
+- `src/runtime/common/`
+  shared runtime utilities such as CPU affinity helpers
+- `src/modules/web/`
+  HTTP parser, response framing, router, sessions, streaming body handling,
+  deferred responses, file streaming, and worker server logic
+- `src/modules/proxy/`
+  TCP proxy server, upstream connector, bridge logic, TLS context, and ACME
+  challenge session support
+- `src/modules/game/`
+  packet framing, player/session registry, room dispatch, and room-management
+  helpers for binary multiplayer protocols
+- `src/modules/observability/`
+  logging implementation used by runtime and modules
 
 ## Core Types
 
@@ -95,3 +131,12 @@ The runtime is currently validated through:
 - focused unit tests under `tests/`
 - example programs under `examples/runtime/`
 - sanitizer rebuilds via `scripts/run_runtime_sanitizers.sh`
+
+Optional module behavior is covered by:
+
+- HTTP tests under `tests/web/`
+- proxy tests under `tests/proxy/`
+- observability tests under `tests/observability/`
+- web, proxy, and game examples under `examples/web/`, `examples/proxy/`,
+  and `examples/game/`; the full dungeon RPG gameplay port lives under
+  `examples/game/dungeon_full_server/`

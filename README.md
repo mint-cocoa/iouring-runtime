@@ -6,8 +6,9 @@
 - keep protocol and application concerns outside the runtime
 - validate lifecycle and shutdown behavior with focused tests and examples
 
-This repository intentionally does not include HTTP, WebSocket, storage, or
-game-server layers.
+The default package is intentionally limited to the runtime core. Higher-level
+HTTP, proxy, and multiplayer packet support live in optional module targets so
+the core target stays small and protocol-agnostic.
 
 An optional HTTP module can be built from the same source tree, but it is a
 separate package and target:
@@ -22,6 +23,16 @@ An optional TCP proxy module can also be built from the same source tree:
 - public headers under `iouring_runtime/proxy/...`
 - enabled only with `-DBUILD_PROXY=ON`
 - can optionally terminate downstream TLS with OpenSSL
+
+An optional multiplayer game packet module can also be built from the same
+source tree:
+
+- `iouring_runtime_game::RuntimeGame`
+- public headers under `iouring_runtime/game/...`
+- enabled only with `-DBUILD_GAME=ON`
+- includes packet framing, player/session registry, room dispatch, and room
+  management helpers
+- includes a protobuf packet echo example when `protoc` is available
 
 ## Scope
 
@@ -41,6 +52,39 @@ The runtime surface intentionally excludes:
 - packet schemas
 - storage drivers
 - domain/application logic
+
+## Repository Layout
+
+- `include/iouring_runtime/core/`
+  public runtime headers for rings, listeners, sessions, buffers, queues,
+  timers, and core types
+- `include/iouring_runtime/web/`
+  public headers for the optional HTTP module
+- `include/iouring_runtime/proxy/`
+  public headers for the optional TCP proxy module
+- `include/iouring_runtime/game/`
+  public headers for the optional multiplayer packet module
+- `include/iouring_runtime/observability/`
+  public logging/profiling helpers shared by modules
+- `src/runtime/`
+  core runtime implementation split by `ring`, `io`, `job`, and `common`
+- `src/modules/web/`
+  HTTP parser/session/router/server implementation
+- `src/modules/proxy/`
+  TCP reverse proxy implementation, including TLS and ACME helper sessions
+- `src/modules/game/`
+  packet framing, player/session registry, room dispatch, and room-management
+  helpers for binary multiplayer protocols
+- `src/modules/observability/`
+  logging implementation
+- `examples/runtime/`, `examples/web/`, `examples/proxy/`, `examples/game/`
+  runnable examples for each layer
+- `tests/`
+  focused tests grouped by runtime, modules, and protocol behavior
+- `scripts/`
+  sanitizer, wrk, benchmark, and comparison helpers
+- `deploy/`
+  Kubernetes manifests used by example deployments
 
 ## Build
 
@@ -85,6 +129,14 @@ cmake --build build-proxy -j$(nproc)
 cmake --install build-proxy --prefix /tmp/iouring-runtime-install
 ```
 
+Optional game packet module:
+
+```bash
+cmake -S . -B build-game -DCMAKE_BUILD_TYPE=Release -DBUILD_GAME=ON
+cmake --build build-game -j$(nproc)
+cmake --install build-game --prefix /tmp/iouring-runtime-install
+```
+
 ## Examples
 
 - `examples/runtime/core_echo/`
@@ -92,6 +144,12 @@ cmake --install build-proxy --prefix /tmp/iouring-runtime-install
 - `examples/web/dropapp/`
 - `examples/proxy/tcp_reverse_proxy/`
   deployment assets: `examples/proxy/tcp_reverse_proxy/deploy/`
+- `examples/game/dungeon_packet_echo/`
+  protobuf packet example for login, room list, room creation, and room join
+  flow over the dungeon RPG wire protocol
+- `examples/game/dungeon_full_server/`
+  full dungeon RPG gameplay server port with SQLite or in-memory account,
+  character, inventory, and currency storage
 
 Build examples with:
 

@@ -1,0 +1,8 @@
+syntax = "proto3";
+package game;
+
+message AccountRow {
+    uint64 id = 1;
+    string username = 2;
+    string password_hash = 3;
+}

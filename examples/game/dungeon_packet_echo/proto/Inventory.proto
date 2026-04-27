@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package game;
+
+import "Common.proto";
+
+// 501: 인벤토리 초기화 (S→C)
+message S_InventoryInit {
+  repeated ItemInstance items = 1;
+}
+
+// 502: 아이템 사용 요청 (C→S)
+message C_UseItem {
+  int64 instance_id = 1;
+}
+
+// 503: 아이템 사용 응답 (S→C)
+message S_UseItem {
+  bool   success     = 1;
+  int64  instance_id = 2;
+  string effect      = 3;
+}
+
+// 504: 아이템 버리기 요청 (C→S)
+message C_DropItem {
+  int64 instance_id = 1;
+  int32 quantity    = 2;
+}
+
+// 505: 아이템 버리기 응답 (S→C)
+message S_DropItem {
+  bool  success     = 1;
+  int64 instance_id = 2;
+}
+
+// 506: 아이템 이동 요청 (C→S)
+message C_MoveItem {
+  int64 instance_id = 1;
+  int32 new_slot    = 2;
+}
+
+// 507: 아이템 이동 응답 (S→C)
+message S_MoveItem {
+  bool  success     = 1;
+  int64 instance_id = 2;
+  int32 new_slot    = 3;
+}
+
+// 508: 아이템 추가 알림 (S→C)
+message S_ItemAdd {
+  ItemInstance item = 1;
+}
+
+// 509: 아이템 제거 알림 (S→C)
+message S_ItemRemove {
+  int64 instance_id = 1;
+}

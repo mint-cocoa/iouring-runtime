@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package game;
+
+// 3D 좌표
+message Vec3 {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}
+
+// 플레이어 전체 정보 (스폰, 플레이어 목록 등에 사용)
+message PlayerInfo {
+  uint64 player_id  = 1;
+  string name       = 2;
+  Vec3   position   = 3;
+  float  rotation_y = 4;
+  int32  hp         = 5;
+  int32  max_hp     = 6;
+  int32  level      = 7;
+  uint32 zone_id    = 8;
+  uint64 party_id   = 9;
+}
+
+// 파티 멤버 정보
+message PartyMemberInfo {
+  uint64 player_id   = 1;
+  string player_name = 2;
+  int32  hp          = 3;
+  int32  max_hp      = 4;
+  int32  level       = 5;
+  bool   is_leader   = 6;
+}
+
+// 맵 프롭 (barrel, chest 등)
+message MapProp {
+  float x          = 1;
+  float z          = 2;
+  int32 prop_type  = 3;  // 0=barrel,1=chest,2=rocks,3=banner,4=trap
+  float rotation_y = 4;
+}
+
+// 맵 포인트 라이트
+message MapLight {
+  float x           = 1;
+  float z           = 2;
+  float r           = 3;
+  float g           = 4;
+  float b           = 5;
+  float intensity   = 6;
+  float range       = 7;
+  bool  soft_shadow = 8;
+}
+
+// 캐릭터 정보 (캐릭터 선택 화면용)
+message CharacterInfo {
+  uint64 char_id = 1;
+  string name    = 2;
+  int32  level   = 3;
+}
+
+// 인벤토리 아이템 인스턴스
+message ItemInstance {
+  int64 instance_id  = 1;
+  int32 item_def_id  = 2;
+  int32 slot         = 3;
+  int32 quantity     = 4;
+  int32 durability   = 5;
+}
+
+// 포탈 정보
+message PortalInfo {
+  uint32 portal_id   = 1;
+  float  x           = 2;
+  float  z           = 3;
+  uint32 target_zone = 4;  // 0 = 새 존 자동 생성
+  string target_name = 5;
+}
+
+// 서버 생성 맵 데이터
+message MapData {
+  int32 grid_width            = 1;
+  int32 grid_height           = 2;
+  float cell_size             = 3;
+  bytes grid                  = 4;  // row-major, 1 byte/cell: 0=floor, 1=wall
+  repeated MapProp props      = 5;
+  repeated MapLight lights    = 6;
+  Vec3 spawn_position         = 7;
+  repeated PortalInfo portals = 8;
+}

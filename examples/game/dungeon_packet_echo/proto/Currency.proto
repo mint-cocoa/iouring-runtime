@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package game;
+
+// 601: 재화 초기화 (S→C)
+message S_CurrencyInit {
+  int64 gold   = 1;
+  int64 gems   = 2;
+  int64 tokens = 3;
+}
+
+// 602: 구매 요청 (C→S)
+message C_Purchase {
+  int32 item_def_id = 1;
+  int32 quantity    = 2;
+}
+
+// 603: 구매 응답 (S→C)
+message S_Purchase {
+  bool   success = 1;
+  string error   = 2;
+}
+
+// 604: 재화 업데이트 알림 (S→C)
+message S_CurrencyUpdate {
+  int64 gold   = 1;
+  int64 gems   = 2;
+  int64 tokens = 3;
+}

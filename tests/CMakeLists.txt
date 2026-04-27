@@ -77,3 +77,25 @@ if(BUILD_PROXY)
     target_link_libraries(test_tcp_proxy PRIVATE RuntimeProxy GTest::gtest_main)
     add_test(NAME test_tcp_proxy COMMAND test_tcp_proxy)
 endif()
+
+if(BUILD_GAME)
+    add_executable(test_packet_builder game/test_packet_builder.cpp)
+    target_link_libraries(test_packet_builder PRIVATE RuntimeGame GTest::gtest_main)
+    add_test(NAME test_packet_builder COMMAND test_packet_builder)
+
+    add_executable(test_packet_session game/test_packet_session.cpp)
+    target_link_libraries(test_packet_session PRIVATE RuntimeGame GTest::gtest_main)
+    add_test(NAME test_packet_session COMMAND test_packet_session)
+
+    add_executable(test_player_registry game/test_player_registry.cpp)
+    target_link_libraries(test_player_registry PRIVATE RuntimeGame GTest::gtest_main)
+    add_test(NAME test_player_registry COMMAND test_player_registry)
+
+    add_executable(test_room game/test_room.cpp)
+    target_link_libraries(test_room PRIVATE RuntimeGame GTest::gtest_main)
+    add_test(NAME test_room COMMAND test_room)
+
+    add_executable(test_room_manager game/test_room_manager.cpp)
+    target_link_libraries(test_room_manager PRIVATE RuntimeGame GTest::gtest_main)
+    add_test(NAME test_room_manager COMMAND test_room_manager)
+endif()

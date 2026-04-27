@@ -16,6 +16,7 @@ set(IORUNTIME_PACKAGE_NAME iouring_runtime)
 set(IORUNTIME_OBSERVABILITY_PACKAGE_NAME iouring_runtime_observability)
 set(IORUNTIME_WEB_PACKAGE_NAME iouring_runtime_web)
 set(IORUNTIME_PROXY_PACKAGE_NAME iouring_runtime_proxy)
+set(IORUNTIME_GAME_PACKAGE_NAME iouring_runtime_game)
 
 FetchContent_Declare(
     spdlog
@@ -31,6 +32,7 @@ find_package(Threads REQUIRED)
 
 option(BUILD_WEB "Build the optional HTTP web module" OFF)
 option(BUILD_PROXY "Build the optional TCP proxy module" OFF)
+option(BUILD_GAME "Build the optional multiplayer game packet module" OFF)
 
 if(BUILD_WEB)
     FetchContent_Declare(
@@ -204,6 +206,30 @@ if(BUILD_PROXY)
     target_compile_options(RuntimeProxy PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+if(BUILD_GAME)
+    add_library(RuntimeGame STATIC
+        src/modules/game/PacketSession.cpp
+        src/modules/game/PlayerRegistry.cpp
+        src/modules/game/Room.cpp
+        src/modules/game/RoomManager.cpp
+    )
+
+    add_library(${IORUNTIME_GAME_PACKAGE_NAME}::RuntimeGame ALIAS RuntimeGame)
+
+    target_include_directories(RuntimeGame
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+
+    target_link_libraries(RuntimeGame
+        PUBLIC
+            Runtime
+    )
+
+    target_compile_options(RuntimeGame PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 option(BUILD_EXAMPLES "Build runtime examples" ON)
 set(_EXAMPLE_DIRS
     examples/runtime/core_echo
@@ -223,6 +249,19 @@ if(BUILD_PROXY)
     list(APPEND _EXAMPLE_DIRS
         examples/proxy/tcp_reverse_proxy
     )
+endif()
+if(BUILD_GAME)
+    find_package(Protobuf QUIET)
+    if(Protobuf_FOUND AND Protobuf_PROTOC_EXECUTABLE)
+        list(APPEND _EXAMPLE_DIRS
+            examples/game/dungeon_packet_echo
+            examples/game/dungeon_full_server
+        )
+    else()
+        message(WARNING
+            "Protobuf library or protoc was not found; "
+            "skipping examples/game/dungeon_packet_echo")
+    endif()
 endif()
 if(BUILD_EXAMPLES)
     foreach(_dir IN LISTS _EXAMPLE_DIRS)
@@ -277,6 +316,17 @@ if(BUILD_PROXY)
     )
 endif()
 
+if(BUILD_GAME)
+    install(
+        TARGETS RuntimeGame
+        EXPORT ${IORUNTIME_GAME_PACKAGE_NAME}Targets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
+
 install(
     DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/core"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
@@ -297,6 +347,13 @@ endif()
 if(BUILD_PROXY)
     install(
         DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/proxy"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
+    )
+endif()
+
+if(BUILD_GAME)
+    install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/game"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
     )
 endif()
@@ -323,6 +380,14 @@ if(BUILD_PROXY)
     )
 endif()
 
+if(BUILD_GAME)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/iouring_runtime_gameConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_gameConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_GAME_PACKAGE_NAME}"
+    )
+endif()
+
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtimeConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
@@ -340,6 +405,14 @@ endif()
 if(BUILD_PROXY)
     write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_proxyConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+endif()
+
+if(BUILD_GAME)
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_gameConfigVersion.cmake"
         VERSION "${PROJECT_VERSION}"
         COMPATIBILITY SameMajorVersion
     )
@@ -367,6 +440,15 @@ if(BUILD_PROXY)
         FILE "${IORUNTIME_PROXY_PACKAGE_NAME}Targets.cmake"
         NAMESPACE ${IORUNTIME_PROXY_PACKAGE_NAME}::
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_PROXY_PACKAGE_NAME}"
+    )
+endif()
+
+if(BUILD_GAME)
+    install(
+        EXPORT ${IORUNTIME_GAME_PACKAGE_NAME}Targets
+        FILE "${IORUNTIME_GAME_PACKAGE_NAME}Targets.cmake"
+        NAMESPACE ${IORUNTIME_GAME_PACKAGE_NAME}::
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_GAME_PACKAGE_NAME}"
     )
 endif()
 
@@ -398,5 +480,14 @@ if(BUILD_PROXY)
             "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_proxyConfig.cmake"
             "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_proxyConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_PROXY_PACKAGE_NAME}"
+    )
+endif()
+
+if(BUILD_GAME)
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_gameConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/iouring_runtime_gameConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${IORUNTIME_GAME_PACKAGE_NAME}"
     )
 endif()

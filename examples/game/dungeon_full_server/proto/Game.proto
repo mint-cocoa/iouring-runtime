@@ -1,0 +1,148 @@
+syntax = "proto3";
+
+package game;
+
+import "Common.proto";
+
+// 201: 이동 입력 (C→S)
+message C_Move {
+  Vec3  position   = 1;
+  float rotation_y = 2;
+  Vec3  velocity   = 3;
+  int32 state      = 4;  // 0=idle, 1=walk, 2=run
+}
+
+// 202: 이동 브로드캐스트 (S→C)
+message S_Move {
+  uint64 player_id  = 1;
+  Vec3   position   = 2;
+  float  rotation_y = 3;
+  Vec3   velocity   = 4;
+  int32  state      = 5;
+}
+
+// 203: 플레이어 스폰 알림 (S→C)
+message S_Spawn {
+  PlayerInfo player = 1;
+}
+
+// 204: 플레이어 디스폰 알림 (S→C)
+message S_Despawn {
+  uint64 player_id = 1;
+}
+
+// 205: 공격 요청 (C→S)
+message C_Attack {
+  uint64 target_id  = 1;
+  int32  skill_id   = 2;
+  Vec3   fire_pos   = 3;  // 발사 위치
+  Vec3   fire_dir   = 4;  // 발사 방향
+}
+
+// 206: 공격 애니메이션 브로드캐스트 (S→C)
+message S_Attack {
+  uint64 attacker_id = 1;
+  uint64 target_id   = 2;
+  int32  skill_id    = 3;
+  Vec3   fire_pos    = 4;  // 발사 위치
+  Vec3   fire_dir    = 5;  // 발사 방향
+}
+
+// 207: 데미지 결과 브로드캐스트 (S→C)
+message S_Damage {
+  uint64 attacker_id  = 1;
+  uint64 target_id    = 2;
+  int32  damage       = 3;
+  int32  remaining_hp = 4;
+  int32  skill_id     = 5;
+  bool   is_dead      = 6;
+}
+
+// 208: 존 내 전체 플레이어 목록 (S→C)
+message S_PlayerList {
+  repeated PlayerInfo players = 1;
+}
+
+// 210: 리스폰 알림 (S→C)
+message S_Respawn {
+  PlayerInfo player = 1;
+}
+
+// 211: 발사 알림 (C→S) — 총알 생성 시점에 전송
+message C_Fire {
+  Vec3 fire_pos = 1;
+  Vec3 fire_dir = 2;
+}
+
+// 212: 발사 브로드캐스트 (S→C)
+message S_Fire {
+  uint64 player_id = 1;
+  Vec3   fire_pos  = 2;
+  Vec3   fire_dir  = 3;
+}
+
+// 스킬 정보 단위
+message SkillInfoData {
+  uint32 skill_id      = 1;
+  string name          = 2;
+  int32  damage        = 3;
+  float  range         = 4;
+  uint32 cooldown_ms   = 5;
+  bool   is_self_target = 6;
+}
+
+// 209: 스킬 테이블 (S→C) - 게임 입장 시 전송
+message S_SkillData {
+  repeated SkillInfoData skills = 1;
+}
+
+// 213: 스코어보드 (S→C)
+message ScoreEntry {
+  uint64 player_id = 1;
+  string name      = 2;
+  int32  kills     = 3;
+  int32  deaths    = 4;
+  int32  level     = 5;
+}
+message S_Scoreboard {
+  repeated ScoreEntry entries = 1;
+}
+
+// 216: 바닥 아이템 스폰 알림 (S→C)
+message S_GroundItemSpawn {
+  uint64 ground_id   = 1;  // 고유 ID
+  int32  item_def_id = 2;  // 아이템 종류 (100=독텍)
+  Vec3   position    = 3;
+  string label       = 4;  // 표시 이름 (예: "OrcSlayer의 독텍")
+}
+
+// 217: 바닥 아이템 소멸 알림 (S→C)
+message S_GroundItemDespawn {
+  uint64 ground_id = 1;
+}
+
+// 218: 줍기 요청 (C→S)
+message C_Pickup {
+  uint64 ground_id = 1;
+}
+
+// 219: 줍기 응답 (S→C)
+message S_Pickup {
+  bool   success    = 1;
+  uint64 ground_id  = 2;
+  string error      = 3;
+}
+
+// 214: 포탈 진입 (C→S)
+message C_Portal {
+  uint32 portal_id = 1;
+}
+
+// 215: 포탈 응답 (S→C)
+message S_Portal {
+  bool       success  = 1;
+  uint32     zone_id  = 2;
+  PlayerInfo player   = 3;
+  MapData    map_data = 4;
+  string     error    = 5;
+}

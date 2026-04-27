@@ -32,8 +32,9 @@ Start with `iouring-runtime` when you are building:
 - a transport/runtime experiment around `io_uring`
 - a lower-level service where lifecycle control matters more than web helpers
 
-If you need HTTP, WebSocket, storage, packet schemas, or application-specific
-logic, those should live in repositories or layers above this runtime.
+If you need HTTP, use the optional `RuntimeWeb` module. WebSocket, storage,
+packet schemas, and application-specific logic should live in layers above the
+runtime core.
 
 ## Public Runtime Surface
 
@@ -106,6 +107,10 @@ That means `Runtime` should not absorb:
 - static file policy
 - auth helpers
 - application-domain concepts
+
+The repository may still contain optional modules that use the runtime. Those
+modules should remain separate targets with their public headers outside
+`iouring_runtime/core/...`.
 
 ## Related Docs
 

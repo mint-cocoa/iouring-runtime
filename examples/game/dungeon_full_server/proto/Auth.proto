@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package game;
+
+import "Common.proto";
+
+// 101: 로그인 요청 (C→S)
+message C_Login {
+  string username = 1;
+  string password = 2;
+}
+
+// 102: 로그인 응답 (S→C)
+message S_Login {
+  bool   success   = 1;
+  uint64 player_id = 2;
+}
+
+// 103: 게임 월드 입장 요청 (C→S)
+message C_EnterGame {
+}
+
+// 104: 입장 응답 + 플레이어 정보 (S→C)
+message S_EnterGame {
+  bool       success  = 1;
+  PlayerInfo player   = 2;
+  MapData    map_data = 3;
+}
+
+// --- Room (Zone) messages ---
+
+message RoomInfo {
+  uint32 zone_id      = 1;
+  string room_name    = 2;
+  uint32 player_count = 3;
+  uint32 max_players  = 4;
+}
+
+// 105: 룸 목록 요청 (C→S)
+message C_RoomList {}
+
+// 106: 룸 목록 응답 (S→C)
+message S_RoomList {
+  repeated RoomInfo rooms = 1;
+}
+
+// 107: 룸 생성 요청 (C→S)
+message C_CreateRoom {
+  string room_name = 1;
+}
+
+// 108: 룸 생성 응답 (S→C)
+message S_CreateRoom {
+  bool       success  = 1;
+  uint32     zone_id  = 2;
+  PlayerInfo player   = 3;
+  MapData    map_data = 4;
+}
+
+// 109: 룸 참가 요청 (C→S)
+message C_JoinRoom {
+  uint32 zone_id = 1;
+}
+
+// 110: 룸 참가 응답 (S→C)
+message S_JoinRoom {
+  bool       success  = 1;
+  uint32     zone_id  = 2;
+  PlayerInfo player   = 3;
+  MapData    map_data = 4;
+  string     error    = 5;
+}
+
+// 111: 회원가입 요청 (C→S)
+message C_Register {
+  string username = 1;
+  string password = 2;
+}
+
+// 112: 회원가입 응답 (S→C)
+message S_Register {
+  bool   success = 1;
+  string error   = 2;
+}
+
+// 113: 캐릭터 목록 요청 (C→S)
+message C_CharList {}
+
+// 114: 캐릭터 목록 응답 (S→C)
+message S_CharList {
+  repeated CharacterInfo characters = 1;
+}
+
+// 115: 캐릭터 생성 요청 (C→S)
+message C_CreateChar {
+  string name = 1;
+}
+
+// 116: 캐릭터 생성 응답 (S→C)
+message S_CreateChar {
+  bool          success   = 1;
+  string        error     = 2;
+  CharacterInfo character = 3;
+}
+
+// 117: 캐릭터 선택 요청 (C→S)
+message C_SelectChar {
+  uint64 char_id = 1;
+}
+
+// 118: 캐릭터 선택 응답 (S→C)
+message S_SelectChar {
+  bool   success   = 1;
+  uint64 player_id = 2;
+  string name      = 3;
+  int32  level     = 4;
+}
