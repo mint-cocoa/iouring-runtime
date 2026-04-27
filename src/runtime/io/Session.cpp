@@ -135,7 +135,7 @@ void Session::DisconnectAfterFlush() {
 void Session::Disconnect() {
     if (disconnecting_) return;
     disconnecting_ = true;
-    obs::LogWarn(kLogCategory, "Session[fd={} sid={}]: [DISC:ENTER] Disconnect() called", Fd(), session_id_);
+    obs::LogDebug(kLogCategory, "Session[fd={} sid={}]: [DISC:ENTER] Disconnect() called", Fd(), session_id_);
 
     // 1. Shutdown the socket — causes recv to EOF and send to error,
     //    which naturally terminates the multishot recv.
@@ -246,7 +246,7 @@ void Session::TryRelease() {
     if (pending_io_ > 0)
         return;
 
-    obs::LogWarn(kLogCategory, "Session[fd={} sid={}]: [DISC:RELEASED] session destroyed", Fd(), session_id_);
+    obs::LogDebug(kLogCategory, "Session[fd={} sid={}]: [DISC:RELEASED] session destroyed", Fd(), session_id_);
     OnDisconnected();
     if (on_disconnect_)
         on_disconnect_(std::static_pointer_cast<Session>(shared_from_this()));

@@ -525,6 +525,11 @@ protected:
     }
 
     void OnDisconnected() override {
+        if (websocket_ && !client_id_.empty()) {
+            obs::LogInfo(obs::LogCategory::kSession,
+                         "activity websocket disconnected client_id={} instance_id={} fd={}",
+                         client_id_, instance_id_, Fd());
+        }
         g_hub.Remove(*this);
     }
 
@@ -762,6 +767,9 @@ private:
             g_hub.Register(*this,
                            std::static_pointer_cast<ActivitySession>(shared_from_this()),
                            instance_id_, client_id_);
+            obs::LogInfo(obs::LogCategory::kSession,
+                         "activity websocket joined client_id={} instance_id={} fd={}",
+                         client_id_, instance_id_, Fd());
             SendTextAsync("{\"type\":\"STATE_UPDATE\",\"seq\":1,\"origin\":null,\"payload\":" +
                           g_hub.StatePayloadJson(instance_id_) + "}");
             g_hub.BroadcastPresence(instance_id_);
