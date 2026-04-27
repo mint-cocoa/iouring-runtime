@@ -10,6 +10,43 @@ The default package is intentionally limited to the runtime core. Higher-level
 HTTP, proxy, and multiplayer packet support live in optional module targets so
 the core target stays small and protocol-agnostic.
 
+## Portfolio Snapshot
+
+This repository is also the main portfolio page for two connected tracks:
+
+- **C++ server runtime**
+  - Linux `io_uring` runtime core with listener/session lifecycle, send/recv
+    buffers, queued writes, backpressure, job queues, timers, and focused
+    shutdown tests.
+  - Modular server layers under `src/modules`: HTTP routing/static serving,
+    TCP reverse proxying with optional TLS/ACME helpers, multiplayer packet
+    sessions, observability helpers, and reusable media/HLS utilities.
+  - Runnable C++ examples for echo servers, HTTP apps, file hosting,
+    speedtest/status pages, webhook capture, TCP proxying, and dungeon game
+    protocol flows.
+  - A C++ Discord Activity backend at `app/activity-server` that uses the
+    runtime directly for `/healthz`, queue/download/play APIs, HLS serving,
+    HLS proxying, thumbnail proxying, and WebSocket room state updates.
+- **Homelab operations**
+  - Dockerized services for the Activity backend and deployable example apps.
+  - GitHub Actions workflows that build GHCR images for `dropapp` and
+    `webhook-inbox`, then update the home GitOps repository with SHA-pinned
+    image tags.
+  - Kubernetes home manifests for k3s, ingress-nginx, MetalLB, Argo CD, and a
+    demo workload under `deploy/k8s/home`.
+  - Production-oriented service assets for systemd, env files, metrics files,
+    local persistent storage, and reverse-proxy integration.
+
+Current implementation status:
+
+- Core runtime, observability, media utilities, and Activity C++ server build
+  by default.
+- Optional `RuntimeWeb`, `RuntimeProxy`, and `RuntimeGame` modules are enabled
+  with `-DBUILD_WEB=ON`, `-DBUILD_PROXY=ON`, and `-DBUILD_GAME=ON`.
+- `app/activity-backend` remains as the FastAPI migration source; TVING cookie
+  playback, Netflix proxying, and WebRTC proxying still need to be ported
+  before it can be removed.
+
 An optional HTTP module can be built from the same source tree, but it is a
 separate package and target:
 
@@ -33,6 +70,13 @@ source tree:
 - includes packet framing, player/session registry, room dispatch, and room
   management helpers
 - includes a protobuf packet echo example when `protoc` is available
+
+A reusable media utility module is installed with the core package:
+
+- `iouring_runtime::RuntimeMedia`
+- public headers under `iouring_runtime/media/...`
+- currently includes HLS manifest rewriting, URL decoding, and HLS content type
+  helpers used by the Activity server
 
 ## Scope
 
@@ -64,6 +108,8 @@ The runtime surface intentionally excludes:
   public headers for the optional TCP proxy module
 - `include/iouring_runtime/game/`
   public headers for the optional multiplayer packet module
+- `include/iouring_runtime/media/`
+  public headers for reusable media/HLS helpers
 - `include/iouring_runtime/observability/`
   public logging/profiling helpers shared by modules
 - `src/runtime/`
@@ -75,8 +121,14 @@ The runtime surface intentionally excludes:
 - `src/modules/game/`
   packet framing, player/session registry, room dispatch, and room-management
   helpers for binary multiplayer protocols
+- `src/modules/media/`
+  media helper implementation shared by apps and tests
 - `src/modules/observability/`
   logging implementation
+- `app/activity-server/`
+  C++ io_uring Discord Activity backend
+- `app/activity-backend/`
+  FastAPI Activity backend kept as the migration source until feature parity
 - `app/examples/runtime/`, `app/examples/web/`, `app/examples/proxy/`, `app/examples/game/`
   runnable examples for each layer
 - `tests/`
