@@ -143,6 +143,7 @@ if(BUILD_WEB)
         src/modules/web/Router.cpp
         src/modules/web/RouterDeferred.cpp
         src/modules/web/HttpSession.cpp
+        src/modules/web/HttpSessionFile.cpp
         src/modules/web/HttpSessionRecv.cpp
         src/modules/web/HttpSessionRequest.cpp
         src/modules/web/HttpSessionStream.cpp

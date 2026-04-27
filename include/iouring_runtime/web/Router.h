@@ -19,6 +19,7 @@ class RadixTree;
 
 struct RequestContext;
 using HttpHandler = std::function<void(RequestContext&)>;
+using HttpMiddleware = std::function<void(RequestContext&)>;
 
 struct HttpStreamHandler {
     std::function<bool(RequestContext&)> on_headers;
@@ -77,6 +78,7 @@ public:
     void Route(HttpMethod method, std::string path, HttpHandler handler);
     void RouteStream(HttpMethod method, std::string path,
                      HttpStreamHandler handler);
+    void Use(HttpMiddleware middleware);
     void Dispatch(RequestContext& ctx) const;
 
 private:
@@ -87,10 +89,12 @@ private:
         HttpStreamHandler* stream_handler = nullptr;
         std::vector<std::pair<std::string_view, std::string_view>> params;
         bool path_exists = false;
+        std::string allow_header;
     };
 
     MatchResult Match(HttpMethod method, std::string_view path) const;
 
+    std::vector<HttpMiddleware> middlewares_;
     std::unique_ptr<RadixTree> tree_;
 };
 

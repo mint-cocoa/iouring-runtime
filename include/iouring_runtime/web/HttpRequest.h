@@ -69,6 +69,14 @@ public:
         return FindQueryParam(name).has_value();
     }
 
+    std::string QueryParamDecoded(std::string_view name) const {
+        const auto found = FindQueryParam(name);
+        if (!found) {
+            return {};
+        }
+        return PercentDecode(*found, true);
+    }
+
     template <typename T>
     std::optional<T> QueryParamAs(std::string_view name) const {
         const auto found = FindQueryParam(name);
@@ -91,6 +99,55 @@ public:
 
     bool HasParam(std::string_view name) const {
         return FindParam(name).has_value();
+    }
+
+    std::string ParamDecoded(std::string_view name) const {
+        const auto found = FindParam(name);
+        if (!found) {
+            return {};
+        }
+        return PercentDecode(*found, false);
+    }
+
+    std::string_view Cookie(std::string_view name) const {
+        const auto cookie_header = GetHeader("Cookie");
+        if (cookie_header.empty()) {
+            return {};
+        }
+
+        std::string_view remaining = cookie_header;
+        while (!remaining.empty()) {
+            const auto sep = remaining.find(';');
+            auto part = remaining.substr(0, sep);
+            part = TrimAsciiWhitespace(part);
+
+            const auto eq = part.find('=');
+            auto key = TrimAsciiWhitespace(part.substr(0, eq));
+            auto value = eq == std::string_view::npos
+                ? std::string_view{}
+                : TrimAsciiWhitespace(part.substr(eq + 1));
+            if (key == name) {
+                return value;
+            }
+
+            if (sep == std::string_view::npos) {
+                break;
+            }
+            remaining = remaining.substr(sep + 1);
+        }
+        return {};
+    }
+
+    bool HasCookie(std::string_view name) const {
+        return !Cookie(name).empty();
+    }
+
+    std::string CookieDecoded(std::string_view name) const {
+        const auto value = Cookie(name);
+        if (value.empty()) {
+            return {};
+        }
+        return PercentDecode(value, false);
     }
 
     template <typename T>
@@ -238,6 +295,56 @@ private:
         return (value >= 'A' && value <= 'Z')
             ? static_cast<char>(value + ('a' - 'A'))
             : value;
+    }
+
+    static int HexValue(char value) {
+        if (value >= '0' && value <= '9') {
+            return value - '0';
+        }
+        if (value >= 'a' && value <= 'f') {
+            return value - 'a' + 10;
+        }
+        if (value >= 'A' && value <= 'F') {
+            return value - 'A' + 10;
+        }
+        return -1;
+    }
+
+    static std::string PercentDecode(std::string_view value, bool plus_as_space) {
+        std::string decoded;
+        decoded.reserve(value.size());
+
+        for (std::size_t i = 0; i < value.size(); ++i) {
+            const char ch = value[i];
+            if (plus_as_space && ch == '+') {
+                decoded.push_back(' ');
+                continue;
+            }
+            if (ch == '%' && i + 2 < value.size()) {
+                const int hi = HexValue(value[i + 1]);
+                const int lo = HexValue(value[i + 2]);
+                if (hi >= 0 && lo >= 0) {
+                    decoded.push_back(static_cast<char>((hi << 4) | lo));
+                    i += 2;
+                    continue;
+                }
+            }
+            decoded.push_back(ch);
+        }
+
+        return decoded;
+    }
+
+    static std::string_view TrimAsciiWhitespace(std::string_view value) {
+        while (!value.empty() &&
+               (value.front() == ' ' || value.front() == '\t')) {
+            value.remove_prefix(1);
+        }
+        while (!value.empty() &&
+               (value.back() == ' ' || value.back() == '\t')) {
+            value.remove_suffix(1);
+        }
+        return value;
     }
 
     std::vector<Header> headers_;

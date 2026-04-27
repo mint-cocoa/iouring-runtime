@@ -3,7 +3,10 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <limits>
+#include <string_view>
+#include <unordered_map>
 #include <string>
 
 using iouring_runtime::web::RequestContext;
@@ -55,6 +58,30 @@ void ConfigureLoggingFromEnv() {
         "HELLO_HTTP_LOG_LEVEL");
 }
 
+std::string ReadEnvOrDefault(const char* name, std::string fallback) {
+    if (const char* raw = std::getenv(name)) {
+        return raw;
+    }
+    return fallback;
+}
+
+std::string JoinPath(std::string_view base, std::string_view leaf) {
+    if (base.empty()) {
+        return std::string(leaf);
+    }
+    std::string path(base);
+    if (path.back() != '/') {
+        path.push_back('/');
+    }
+    path.append(leaf);
+    return path;
+}
+
+bool FileExists(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    return static_cast<bool>(file);
+}
+
 } // namespace
 
 int main() {
@@ -99,19 +126,94 @@ int main() {
     config.backpressure.disconnect_on_high_watermark =
         ReadUnsignedEnv<std::uint32_t>("HELLO_HTTP_DISCONNECT_ON_HIGH_WATERMARK", 0) != 0;
 
+    const std::string static_root = ReadEnvOrDefault(
+        "HELLO_HTTP_STATIC_ROOT",
+        "scripts/wrk/reference_servers/www");
+    const std::unordered_map<std::string, std::string> payload_files = {
+        {"256b", JoinPath(static_root, "payload-256b.txt")},
+        {"4k", JoinPath(static_root, "payload-4k.txt")},
+        {"64k", JoinPath(static_root, "payload-64k.txt")},
+    };
+
     iouring_runtime::web::WebServer server(config);
     iouring_runtime::web::WebServer::InstallStopSignalHandlers();
 
+    server.Use([](RequestContext& ctx) {
+        ctx.response.Header("X-Request-Id", std::string(ctx.request_id));
+    });
+
+    server.Use([](RequestContext& ctx) {
+        if (ctx.request.path != "/private") {
+            return;
+        }
+        if (ctx.request.GetHeader("X-API-Key") == "demo-key") {
+            return;
+        }
+        ctx.response
+            .Error(iouring_runtime::web::HttpStatus::kUnauthorized,
+                   "missing or invalid api key")
+            .Send();
+    });
+
     server.Get("/", [](RequestContext& ctx) {
-        ctx.response.ContentType("text/plain")
-            .Body("hello from iouring_runtime_web")
+        ctx.response.Text("hello from iouring_runtime_web")
             .Send();
     });
 
     server.Get("/health", [](RequestContext& ctx) {
-        ctx.response.ContentType("text/plain")
-            .Body("ok")
+        ctx.response.Text("ok")
             .Send();
+    });
+
+    server.Get("/payload/:size", [payload_files](RequestContext& ctx) {
+        const auto size = ctx.request.ParamDecoded("size");
+        const auto it = payload_files.find(std::string(size));
+        if (it == payload_files.end()) {
+            ctx.response
+                .Error(iouring_runtime::web::HttpStatus::kNotFound, "payload not found")
+                .Send();
+            return;
+        }
+        if (!FileExists(it->second)) {
+            ctx.response
+                .Error(iouring_runtime::web::HttpStatus::kInternalServerError, "payload file missing")
+                .Send();
+            return;
+        }
+        if (!ctx.response.SendFile(it->second, "text/plain")) {
+            ctx.response
+                .Error(iouring_runtime::web::HttpStatus::kInternalServerError, "failed to send payload")
+                .Send();
+        }
+    });
+
+    server.Get("/hello/:name", [](RequestContext& ctx) {
+        auto name = ctx.request.ParamDecoded("name");
+        const auto lang = ctx.request.QueryParamDecoded("lang");
+
+        std::string body = "hello, " + name;
+        if (!lang.empty()) {
+            body += " (" + lang + ")";
+        }
+
+        ctx.response.Text(std::move(body)).Send();
+    });
+
+    server.Get("/cookies", [](RequestContext& ctx) {
+        const auto theme = ctx.request.Cookie("theme");
+        if (theme.empty()) {
+            ctx.response
+                .Error(iouring_runtime::web::HttpStatus::kBadRequest,
+                       "missing theme cookie")
+                .Send();
+            return;
+        }
+
+        ctx.response.Json("{\"theme\":\"" + std::string(theme) + "\"}").Send();
+    });
+
+    server.Get("/private", [](RequestContext& ctx) {
+        ctx.response.Json(R"({"ok":true})").Send();
     });
 
     server.Start();

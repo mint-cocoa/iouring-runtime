@@ -53,6 +53,14 @@ TEST_F(HttpParserTest, QueryString) {
     EXPECT_EQ(requests_[0].query, "q=hello&page=1");
 }
 
+TEST_F(HttpParserTest, QueryHelpersDecodePercentEscapesAndPlus) {
+    Feed("GET /search?q=hello%20world&lang=ko+KR HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    ASSERT_EQ(requests_.size(), 1u);
+    EXPECT_EQ(requests_[0].QueryParamDecoded("q"), "hello world");
+    EXPECT_EQ(requests_[0].QueryParamDecoded("lang"), "ko KR");
+}
+
 TEST_F(HttpParserTest, PostWithBody) {
     Feed(
         "POST /api HTTP/1.1\r\n"
@@ -128,6 +136,21 @@ TEST_F(HttpParserTest, ConnectionClose) {
     ASSERT_EQ(requests_.size(), 1u);
     EXPECT_FALSE(requests_[0].keep_alive);
     EXPECT_FALSE(parser_.HasError());
+}
+
+TEST_F(HttpParserTest, CookieHelpersExposeNamedCookieValues) {
+    Feed(
+        "GET / HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "Cookie: theme=light; session=abc123; encoded=hello%20world\r\n"
+        "\r\n");
+
+    ASSERT_EQ(requests_.size(), 1u);
+    EXPECT_EQ(requests_[0].Cookie("theme"), "light");
+    EXPECT_EQ(requests_[0].Cookie("session"), "abc123");
+    EXPECT_EQ(requests_[0].CookieDecoded("encoded"), "hello world");
+    EXPECT_TRUE(requests_[0].HasCookie("theme"));
+    EXPECT_FALSE(requests_[0].HasCookie("missing"));
 }
 
 TEST_F(HttpParserTest, ResetAfterError) {

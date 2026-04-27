@@ -1,19 +1,24 @@
 #include <iouring_runtime/web/HttpSession.h>
 #include <iouring_runtime/web/HttpResponse.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <utility>
 
 namespace iouring_runtime::web {
 
+namespace {
+std::atomic<std::uint64_t> g_request_id_counter{1};
+} // namespace
+
 std::string HttpSession::GenerateRequestId() {
-    thread_local std::uint64_t counter = 0;
-    ++counter;
     char buffer[24];
     const int written = std::snprintf(
         buffer, sizeof(buffer), "req-%013llx",
-        static_cast<unsigned long long>(counter));
+        static_cast<unsigned long long>(
+            g_request_id_counter.fetch_add(1, std::memory_order_relaxed)));
     return std::string(buffer, written > 0 ? static_cast<std::size_t>(written) : 0);
 }
 
@@ -46,12 +51,43 @@ void HttpSession::SendResponse(core::buffer::SendBufferRef buf) {
     Send(std::move(buf));
 }
 
+bool HttpSession::StartFileStream(core::buffer::SendBufferRef header,
+                                  int file_fd,
+                                  std::uint64_t file_size,
+                                  std::uint32_t chunk_size,
+                                  std::uint32_t max_chunks_per_write) {
+    if (!header || file_fd < 0 || file_stream_.active) {
+        return false;
+    }
+
+    file_stream_.fd.Reset(file_fd);
+    file_stream_.remaining_bytes = file_size;
+    file_stream_.chunk_size = std::max<std::uint32_t>(chunk_size, 4 * 1024);
+    file_stream_.max_chunks_per_write =
+        std::max<std::uint32_t>(max_chunks_per_write, 1);
+    file_stream_.active = true;
+
+    if (!Send(std::move(header)).has_value()) {
+        ResetFileStream();
+        return false;
+    }
+
+    return PumpFileStream();
+}
+
 void HttpSession::OnRecv(std::span<const std::byte> data) {
     HandleHttpRecv(data.data(), static_cast<std::uint32_t>(data.size()));
 }
 
 void HttpSession::OnDisconnected() {
+    ResetFileStream();
     AbortStreamingRequest();
+}
+
+void HttpSession::OnSocketDrained() {
+    if (file_stream_.active) {
+        PumpFileStream();
+    }
 }
 
 bool HttpSession::OnTimeoutTick(std::chrono::steady_clock::time_point now) {

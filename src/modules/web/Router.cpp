@@ -47,10 +47,22 @@ Router::MatchResult Router::Match(HttpMethod method, std::string_view path) cons
         result.params = std::move(match.params);
     }
     result.path_exists = match.path_exists;
+    result.allow_header = std::move(match.allow_header);
     return result;
 }
 
+void Router::Use(HttpMiddleware middleware) {
+    middlewares_.push_back(std::move(middleware));
+}
+
 void Router::Dispatch(RequestContext& ctx) const {
+    for (const auto& middleware : middlewares_) {
+        middleware(ctx);
+        if (ctx.response.IsSent()) {
+            return;
+        }
+    }
+
     auto result = Match(ctx.request.method, ctx.request.path);
     if (ctx.request.method == HttpMethod::kHead) {
         ctx.response.SuppressBody();
@@ -94,11 +106,14 @@ void Router::Dispatch(RequestContext& ctx) const {
     }
 
     if (result.path_exists) {
-        ctx.response
+        auto& response = ctx.response
             .Status(HttpStatus::kMethodNotAllowed)
             .ContentType("text/plain")
-            .Body("Method Not Allowed")
-            .Send();
+            .Body("Method Not Allowed");
+        if (!result.allow_header.empty()) {
+            response.Header("Allow", result.allow_header);
+        }
+        response.Send();
         return;
     }
 

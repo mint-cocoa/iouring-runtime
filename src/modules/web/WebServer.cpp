@@ -4,8 +4,12 @@
 
 #include <iouring_runtime/observability/Logging.h>
 
+#include <cerrno>
 #include <csignal>
+#include <string_view>
+#include <sys/socket.h>
 #include <thread>
+#include <unistd.h>
 
 namespace obs = iouring_runtime::observability;
 namespace {
@@ -20,6 +24,35 @@ std::atomic<bool> g_stop_requested{false};
 
 void WebServerSignalHandler(int) {
     g_stop_requested.store(true, std::memory_order_relaxed);
+}
+
+const std::string& ServiceUnavailableResponse() {
+    static const std::string response =
+        "HTTP/1.1 503 Service Unavailable\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 19\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "Service Unavailable";
+    return response;
+}
+
+void SendBestEffortAndClose(int fd, std::string_view payload) {
+    const char* current = payload.data();
+    std::size_t remaining = payload.size();
+    while (remaining > 0) {
+        const auto sent = ::send(fd, current, remaining, MSG_NOSIGNAL);
+        if (sent > 0) {
+            current += sent;
+            remaining -= static_cast<std::size_t>(sent);
+            continue;
+        }
+        if (sent < 0 && errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+    ::close(fd);
 }
 
 } // namespace
@@ -38,6 +71,10 @@ void WebServer::Route(HttpMethod method, std::string path, HttpHandler handler) 
 void WebServer::RouteStream(HttpMethod method, std::string path,
                             HttpStreamHandler handler) {
     router_.RouteStream(method, std::move(path), std::move(handler));
+}
+
+void WebServer::Use(HttpMiddleware middleware) {
+    router_.Use(std::move(middleware));
 }
 
 void WebServer::Start() {
@@ -105,6 +142,9 @@ void WebServer::Start() {
             config_.max_sessions_per_worker);
         worker->listener->SetSessionCountFn([raw_worker]() {
             return raw_worker->live_sessions.load(std::memory_order_relaxed);
+        });
+        worker->listener->SetRejectHandler([](int client_fd) {
+            SendBestEffortAndClose(client_fd, ServiceUnavailableResponse());
         });
 
         auto listen_result = worker->listener->Start();

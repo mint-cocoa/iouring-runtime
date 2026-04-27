@@ -126,7 +126,11 @@ void Listener::OnAccept(int client_fd) {
     if (max_sessions_ > 0 && session_count_fn_) {
         if (session_count_fn_() >= max_sessions_) {
             obs::LogWarn(kLogCategory, "Listener: [REJECT:MAX_SESS] max={} reached, rejecting fd={}", max_sessions_, client_fd);
-            ::close(client_fd);
+            if (reject_handler_) {
+                reject_handler_(client_fd);
+            } else {
+                ::close(client_fd);
+            }
             return;
         }
     }

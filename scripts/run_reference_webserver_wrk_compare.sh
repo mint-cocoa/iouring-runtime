@@ -11,9 +11,11 @@ RESULTS_DIR="${RESULTS_BASE_DIR}/${TIMESTAMP}"
 TARGET="${TARGET:-hello_http}"
 MODE="${MODE:-standard}"
 SERVER_FILTER="${SERVER_FILTER:-}"
+IORUNTIME_MODE="${IORUNTIME_MODE:-local}"
 CURRENT_LOCAL_PID=""
 CURRENT_CONTAINER=""
 WARMUP_DURATION="${WARMUP_DURATION:-2s}"
+IORUNTIME_IMAGE_TAG="${IORUNTIME_IMAGE_TAG:-iouring-runtime-hello-http-bench:latest}"
 
 cleanup() {
     if [[ -n "$CURRENT_LOCAL_PID" ]] && kill -0 "$CURRENT_LOCAL_PID" 2>/dev/null; then
@@ -46,21 +48,35 @@ mkdir -p "$RESULTS_DIR"
 if [[ "$MODE" == "quick" ]]; then
     STEADY_DURATION="${STEADY_DURATION:-8s}"
     MIXED_DURATION="${MIXED_DURATION:-8s}"
+    PAYLOAD_SMALL_DURATION="${PAYLOAD_SMALL_DURATION:-8s}"
+    PAYLOAD_MEDIUM_DURATION="${PAYLOAD_MEDIUM_DURATION:-8s}"
+    PAYLOAD_LARGE_DURATION="${PAYLOAD_LARGE_DURATION:-10s}"
     SATURATION_DURATION="${SATURATION_DURATION:-10s}"
 else
     STEADY_DURATION="${STEADY_DURATION:-10s}"
     MIXED_DURATION="${MIXED_DURATION:-10s}"
+    PAYLOAD_SMALL_DURATION="${PAYLOAD_SMALL_DURATION:-10s}"
+    PAYLOAD_MEDIUM_DURATION="${PAYLOAD_MEDIUM_DURATION:-10s}"
+    PAYLOAD_LARGE_DURATION="${PAYLOAD_LARGE_DURATION:-12s}"
     SATURATION_DURATION="${SATURATION_DURATION:-15s}"
 fi
 
 WORKLOADS=(
   "steady_root|4|128|${STEADY_DURATION}|/||balanced throughput check on GET /"
-  "mixed_routes|4|128|${MIXED_DURATION}|/|${ROOT_DIR}/scripts/wrk/mixed_routes.lua|mixed GET traffic across / and /health"
+  "mixed_routes|4|128|${MIXED_DURATION}|/|${ROOT_DIR}/scripts/wrk/mixed_routes.lua|mixed GET traffic across /, /health, and payload sizes"
+  "payload_256b|4|128|${PAYLOAD_SMALL_DURATION}|/payload/256b||small payload response"
+  "payload_4k|4|96|${PAYLOAD_MEDIUM_DURATION}|/payload/4k||medium payload response"
+  "payload_64k|4|32|${PAYLOAD_LARGE_DURATION}|/payload/64k||large payload response"
   "saturation_root|8|256|${SATURATION_DURATION}|/||higher connection pressure on GET /"
 )
 
-SERVERS=(
-  "iouring_runtime|local|native iouring runtime http server"
+declare -a SERVERS
+if [[ "$IORUNTIME_MODE" == "docker" ]]; then
+    SERVERS+=("iouring_runtime|docker|native iouring runtime http server (dockerized)")
+else
+    SERVERS+=("iouring_runtime|local|native iouring runtime http server")
+fi
+SERVERS+=(
   "nginx|docker|nginx official container"
   "caddy|docker|caddy official container"
 )
@@ -97,8 +113,25 @@ start_iouring_runtime() {
     HELLO_HTTP_PORT="$PORT" \
     HELLO_HTTP_WORKERS="${HELLO_HTTP_WORKERS:-4}" \
     HELLO_HTTP_LOG_LEVEL="${HELLO_HTTP_LOG_LEVEL:-info}" \
+    HELLO_HTTP_STATIC_ROOT="${HELLO_HTTP_STATIC_ROOT:-$ROOT_DIR/scripts/wrk/reference_servers/www}" \
     "$BUILD_DIR/bin/$TARGET" >"${server_dir}/server.log" 2>&1 &
     CURRENT_LOCAL_PID="$!"
+}
+
+start_iouring_runtime_docker() {
+    local server_dir="$1"
+    CURRENT_CONTAINER="wrk-compare-iouring-runtime-${TIMESTAMP}"
+    docker run --rm -d \
+        --name "$CURRENT_CONTAINER" \
+        --security-opt seccomp=unconfined \
+        -p "${PORT}:8080" \
+        -e HELLO_HTTP_PORT=8080 \
+        -e HELLO_HTTP_WORKERS="${HELLO_HTTP_WORKERS:-4}" \
+        -e HELLO_HTTP_LOG_LEVEL="${HELLO_HTTP_LOG_LEVEL:-off}" \
+        -e HELLO_HTTP_WORKER_AFFINITY="${HELLO_HTTP_WORKER_AFFINITY:-off}" \
+        -e HELLO_HTTP_STATIC_ROOT=/srv/www \
+        "$IORUNTIME_IMAGE_TAG" >/dev/null
+    docker logs "$CURRENT_CONTAINER" >"${server_dir}/server.log" 2>&1 || true
 }
 
 start_nginx() {
@@ -108,6 +141,7 @@ start_nginx() {
         --name "$CURRENT_CONTAINER" \
         -p "${PORT}:8080" \
         -v "${ROOT_DIR}/scripts/wrk/reference_servers/nginx.conf:/etc/nginx/nginx.conf:ro" \
+        -v "${ROOT_DIR}/scripts/wrk/reference_servers/www:/srv/www:ro" \
         nginx:alpine >/dev/null
     docker logs "$CURRENT_CONTAINER" >"${server_dir}/server.log" 2>&1 || true
 }
@@ -119,6 +153,7 @@ start_caddy() {
         --name "$CURRENT_CONTAINER" \
         -p "${PORT}:8080" \
         -v "${ROOT_DIR}/scripts/wrk/reference_servers/Caddyfile:/etc/caddy/Caddyfile:ro" \
+        -v "${ROOT_DIR}/scripts/wrk/reference_servers/www:/srv/www:ro" \
         caddy:alpine >/dev/null
     docker logs "$CURRENT_CONTAINER" >"${server_dir}/server.log" 2>&1 || true
 }
@@ -145,12 +180,22 @@ echo "[wrk-compare] pulling container images"
 docker pull nginx:alpine >/dev/null
 docker pull caddy:alpine >/dev/null
 
+if [[ "$IORUNTIME_MODE" == "docker" ]]; then
+    echo "[wrk-compare] building docker image for ${TARGET}"
+    docker build \
+        -f "${ROOT_DIR}/scripts/wrk/reference_servers/iouring_runtime.Dockerfile" \
+        -t "${IORUNTIME_IMAGE_TAG}" \
+        "${ROOT_DIR}" >/dev/null
+fi
+
 cat >"${RESULTS_DIR}/environment.txt" <<EOF
 mode=${MODE}
 host=${HOST}
 port=${PORT}
 target=${TARGET}
 build_dir=${BUILD_DIR}
+ioruntime_mode=${IORUNTIME_MODE}
+ioruntime_image_tag=${IORUNTIME_IMAGE_TAG}
 wrk_path=$(command -v wrk)
 docker_version=$(docker version --format '{{.Server.Version}}')
 python3=$(python3 --version 2>&1)
@@ -169,7 +214,11 @@ for server_entry in "${SERVERS[@]}"; do
 
     case "$name" in
         iouring_runtime)
-            start_iouring_runtime "$server_dir"
+            if [[ "$kind" == "docker" ]]; then
+                start_iouring_runtime_docker "$server_dir"
+            else
+                start_iouring_runtime "$server_dir"
+            fi
             ;;
         nginx)
             start_nginx "$server_dir"

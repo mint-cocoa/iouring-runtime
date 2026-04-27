@@ -161,6 +161,27 @@ TEST_F(FramingFixture, JsonSetsContentType) {
     EXPECT_EQ(BodyBytes(out), R"({"ok":true})");
 }
 
+TEST_F(FramingFixture, TextSetsPlainTextContentType) {
+    HttpResponse response;
+    response.Text("hello text");
+
+    const auto out = Serialize(response, pool);
+
+    EXPECT_EQ(FirstHeaderValue(out, "Content-Type"), "text/plain");
+    EXPECT_EQ(BodyBytes(out), "hello text");
+}
+
+TEST_F(FramingFixture, ErrorSetsStatusPlainTextAndBody) {
+    HttpResponse response;
+    response.Error(HttpStatus::kBadRequest, "bad input");
+
+    const auto out = Serialize(response, pool);
+
+    EXPECT_EQ(response.StatusCode(), HttpStatus::kBadRequest);
+    EXPECT_EQ(FirstHeaderValue(out, "Content-Type"), "text/plain");
+    EXPECT_EQ(BodyBytes(out), "bad input");
+}
+
 TEST_F(FramingFixture, NoContentSuppressesBodyAndContentLength) {
     HttpResponse response;
     response.Status(HttpStatus::kNoContent)

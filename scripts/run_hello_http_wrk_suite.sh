@@ -37,14 +37,18 @@ if [[ "$SUITE_MODE" == "quick" ]]; then
     SMOKE_DURATION="${SMOKE_DURATION:-5s}"
     STEADY_DURATION="${STEADY_DURATION:-10s}"
     MIXED_DURATION="${MIXED_DURATION:-10s}"
-    HEAD_DURATION="${HEAD_DURATION:-8s}"
+    PAYLOAD_SMALL_DURATION="${PAYLOAD_SMALL_DURATION:-8s}"
+    PAYLOAD_MEDIUM_DURATION="${PAYLOAD_MEDIUM_DURATION:-8s}"
+    PAYLOAD_LARGE_DURATION="${PAYLOAD_LARGE_DURATION:-10s}"
     SATURATION_DURATION="${SATURATION_DURATION:-12s}"
     SOAK_DURATION="${SOAK_DURATION:-20s}"
 else
     SMOKE_DURATION="${SMOKE_DURATION:-10s}"
     STEADY_DURATION="${STEADY_DURATION:-20s}"
     MIXED_DURATION="${MIXED_DURATION:-20s}"
-    HEAD_DURATION="${HEAD_DURATION:-15s}"
+    PAYLOAD_SMALL_DURATION="${PAYLOAD_SMALL_DURATION:-12s}"
+    PAYLOAD_MEDIUM_DURATION="${PAYLOAD_MEDIUM_DURATION:-12s}"
+    PAYLOAD_LARGE_DURATION="${PAYLOAD_LARGE_DURATION:-15s}"
     SATURATION_DURATION="${SATURATION_DURATION:-20s}"
     SOAK_DURATION="${SOAK_DURATION:-60s}"
 fi
@@ -52,8 +56,10 @@ fi
 SCENARIOS=(
   "smoke_root|2|32|${SMOKE_DURATION}|/||quick sanity check on GET /"
   "steady_root|4|128|${STEADY_DURATION}|/||balanced throughput and latency run on GET /"
-  "mixed_routes|4|128|${MIXED_DURATION}|/|${ROOT_DIR}/scripts/wrk/mixed_routes.lua|mixed GET traffic across / and /health"
-  "head_health|2|64|${HEAD_DURATION}|/health|${ROOT_DIR}/scripts/wrk/head_health.lua|HEAD request path against /health"
+  "mixed_routes|4|128|${MIXED_DURATION}|/|${ROOT_DIR}/scripts/wrk/mixed_routes.lua|mixed GET traffic across /, /health, and payload sizes"
+  "payload_256b|4|128|${PAYLOAD_SMALL_DURATION}|/payload/256b||small payload response"
+  "payload_4k|4|96|${PAYLOAD_MEDIUM_DURATION}|/payload/4k||medium payload response"
+  "payload_64k|4|32|${PAYLOAD_LARGE_DURATION}|/payload/64k||large payload response"
   "saturation_root|8|256|${SATURATION_DURATION}|/||higher connection pressure on GET /"
   "soak_root|4|128|${SOAK_DURATION}|/||longer stability run on GET /"
 )
@@ -71,6 +77,7 @@ cmake --build "$BUILD_DIR" --target "$TARGET" -j"$(nproc)" >/dev/null
 echo "[wrk-suite] starting $TARGET on ${HOST}:${PORT}"
 HELLO_HTTP_PORT="$PORT" \
 HELLO_HTTP_LOG_LEVEL="${HELLO_HTTP_LOG_LEVEL:-info}" \
+HELLO_HTTP_STATIC_ROOT="${HELLO_HTTP_STATIC_ROOT:-$ROOT_DIR/scripts/wrk/reference_servers/www}" \
 "$BUILD_DIR/bin/$TARGET" >"$BUILD_DIR/${TARGET}.log" 2>&1 &
 SERVER_PID="$!"
 

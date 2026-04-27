@@ -26,6 +26,7 @@ struct MatchResult {
     RouteEntry* entry = nullptr;
     std::vector<std::pair<std::string_view, std::string_view>> params;
     bool path_exists = false;
+    std::string allow_header;
 };
 
 class RadixTree {
@@ -55,6 +56,7 @@ private:
         std::array<RouteEntry, kMethodCount> routes{};
 
         bool HasAnyHandler() const;
+        std::string AllowHeaderValue() const;
     };
 
     static std::vector<std::string> SplitPath(const std::string& path);

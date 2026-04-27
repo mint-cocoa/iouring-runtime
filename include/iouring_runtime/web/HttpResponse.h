@@ -42,9 +42,22 @@ public:
         return *this;
     }
 
+    HttpResponse& Text(std::string text) {
+        content_type_ = "text/plain";
+        body_ = std::move(text);
+        return *this;
+    }
+
     HttpResponse& Json(std::string json_body) {
         content_type_ = "application/json";
         body_ = std::move(json_body);
+        return *this;
+    }
+
+    HttpResponse& Error(HttpStatus status, std::string message) {
+        status_ = status;
+        content_type_ = "text/plain";
+        body_ = std::move(message);
         return *this;
     }
 
@@ -63,6 +76,10 @@ public:
 
     core::buffer::SendBufferRef Build(core::buffer::BufferPool& pool) const;
     void Send();
+    bool SendFile(std::string path,
+                  std::string_view content_type = "application/octet-stream",
+                  std::uint32_t chunk_size = 256 * 1024,
+                  std::uint32_t max_chunks_per_write = 4);
 
     static core::buffer::SendBufferRef NoContent(core::buffer::BufferPool& pool,
                                                  bool keep_alive = true);
@@ -105,6 +122,8 @@ private:
             state_ = State::kDeferred;
         }
     }
+
+    std::string SerializeHeaders(std::size_t body_size) const;
 
     struct HeaderPair {
         std::string name;

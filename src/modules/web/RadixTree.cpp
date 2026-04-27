@@ -51,6 +51,45 @@ bool RadixTree::Node::HasAnyHandler() const {
     return false;
 }
 
+std::string RadixTree::Node::AllowHeaderValue() const {
+    std::string allow;
+
+    auto append_method = [&allow](std::string_view method) {
+        if (!allow.empty()) {
+            allow += ", ";
+        }
+        allow += method;
+    };
+
+    const bool allow_get =
+        routes[static_cast<std::size_t>(HttpMethod::kGet)].HasAnyHandler();
+    const bool allow_head =
+        routes[static_cast<std::size_t>(HttpMethod::kHead)].HasAnyHandler();
+    if (allow_get) {
+        append_method("GET");
+    }
+    if (allow_head || allow_get) {
+        append_method("HEAD");
+    }
+    if (routes[static_cast<std::size_t>(HttpMethod::kPost)].HasAnyHandler()) {
+        append_method("POST");
+    }
+    if (routes[static_cast<std::size_t>(HttpMethod::kPut)].HasAnyHandler()) {
+        append_method("PUT");
+    }
+    if (routes[static_cast<std::size_t>(HttpMethod::kDelete)].HasAnyHandler()) {
+        append_method("DELETE");
+    }
+    if (routes[static_cast<std::size_t>(HttpMethod::kOptions)].HasAnyHandler()) {
+        append_method("OPTIONS");
+    }
+    if (routes[static_cast<std::size_t>(HttpMethod::kPatch)].HasAnyHandler()) {
+        append_method("PATCH");
+    }
+
+    return allow;
+}
+
 RadixTree::RadixTree()
     : root_(std::make_unique<Node>()) {}
 
@@ -175,6 +214,7 @@ MatchResult RadixTree::Match(HttpMethod method, std::string_view path) const {
             result.path_exists = true;
         } else if (root_->HasAnyHandler()) {
             result.path_exists = true;
+            result.allow_header = root_->AllowHeaderValue();
         }
         return result;
     }
@@ -196,8 +236,10 @@ void RadixTree::MatchNode(
             result.entry = const_cast<RouteEntry*>(&route);
             result.params = params;
             result.path_exists = true;
+            result.allow_header = node->AllowHeaderValue();
         } else if (node->HasAnyHandler()) {
             result.path_exists = true;
+            result.allow_header = node->AllowHeaderValue();
         }
         return;
     }
@@ -242,8 +284,10 @@ void RadixTree::MatchNode(
             result.entry = const_cast<RouteEntry*>(&route);
             result.params = params;
             result.path_exists = true;
+            result.allow_header = node->wildcard_child->AllowHeaderValue();
         } else if (node->wildcard_child->HasAnyHandler()) {
             result.path_exists = true;
+            result.allow_header = node->wildcard_child->AllowHeaderValue();
         }
     }
 }

@@ -2,6 +2,11 @@
 
 #include <iouring_runtime/web/HttpSession.h>
 
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <cstring>
 #include <ctime>
 #include <string>
@@ -14,9 +19,10 @@ namespace {
 void AppendDateHeader(std::string& out) {
     out += "Date: ";
     const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+    gmtime_r(&now, &tm);
     char buf[32];
-    std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT",
-                  std::gmtime(&now));
+    std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tm);
     out += buf;
     out += "\r\n";
 }
@@ -86,13 +92,10 @@ HttpResponse& HttpResponse::Redirect(std::string url, HttpStatus status) {
     return *this;
 }
 
-core::buffer::SendBufferRef HttpResponse::Build(
-    core::buffer::BufferPool& pool) const {
+std::string HttpResponse::SerializeHeaders(std::size_t body_size) const {
     std::string headers;
     headers.reserve(256);
-
     const bool status_no_body = StatusMustNotHaveBody(status_);
-    const bool no_body = status_no_body || suppress_body_;
 
     headers += "HTTP/1.1 ";
     headers += std::to_string(static_cast<int>(status_));
@@ -132,7 +135,7 @@ core::buffer::SendBufferRef HttpResponse::Build(
     }
     if (!caller_has_content_length && !status_no_body) {
         headers += "Content-Length: ";
-        headers += std::to_string(body_.size());
+        headers += std::to_string(body_size);
         headers += "\r\n";
     }
     if (!caller_has_connection) {
@@ -152,6 +155,14 @@ core::buffer::SendBufferRef HttpResponse::Build(
     }
 
     headers += "\r\n";
+    return headers;
+}
+
+core::buffer::SendBufferRef HttpResponse::Build(
+    core::buffer::BufferPool& pool) const {
+    const bool status_no_body = StatusMustNotHaveBody(status_);
+    const bool no_body = status_no_body || suppress_body_;
+    const auto headers = SerializeHeaders(body_.size());
 
     const auto total_size = headers.size() + (no_body ? 0 : body_.size());
     auto result = pool.Allocate(static_cast<std::uint32_t>(total_size));
@@ -182,6 +193,73 @@ void HttpResponse::Send() {
     if (buffer) {
         session_->SendResponse(std::move(buffer));
     }
+}
+
+bool HttpResponse::SendFile(std::string path, std::string_view content_type,
+                            std::uint32_t chunk_size,
+                            std::uint32_t max_chunks_per_write) {
+    if (state_ == State::kSent) {
+        return false;
+    }
+    if (!session_ || !pool_) {
+        state_ = State::kSent;
+        return false;
+    }
+
+    const bool status_no_body = StatusMustNotHaveBody(status_);
+    keep_alive_ = false;
+    if (content_type_.empty() && !content_type.empty()) {
+        content_type_ = content_type;
+    }
+
+    int file_fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (file_fd < 0) {
+        Error(errno == ENOENT ? HttpStatus::kNotFound
+                              : HttpStatus::kInternalServerError,
+              errno == ENOENT ? "Not Found" : "Internal Server Error");
+        Send();
+        return false;
+    }
+
+    struct stat st {};
+    if (::fstat(file_fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        ::close(file_fd);
+        Error(HttpStatus::kInternalServerError, "Internal Server Error");
+        Send();
+        return false;
+    }
+
+    const std::uint64_t file_size =
+        static_cast<std::uint64_t>(st.st_size < 0 ? 0 : st.st_size);
+    const bool no_body = status_no_body || suppress_body_;
+    const auto headers = SerializeHeaders(static_cast<std::size_t>(file_size));
+
+    auto result =
+        pool_->Allocate(static_cast<std::uint32_t>(headers.size()));
+    if (!result) {
+        ::close(file_fd);
+        return false;
+    }
+
+    auto header = std::move(*result);
+    auto writable = header->Writable();
+    std::memcpy(writable.data(), headers.data(), headers.size());
+    header->Commit(static_cast<std::uint32_t>(headers.size()));
+    last_built_bytes_ = headers.size();
+    state_ = State::kSent;
+
+    if (no_body) {
+        ::close(file_fd);
+        session_->SendResponse(std::move(header));
+        return true;
+    }
+
+    if (!session_->StartFileStream(std::move(header), file_fd, file_size,
+                                   chunk_size, max_chunks_per_write)) {
+        ::close(file_fd);
+        return false;
+    }
+    return true;
 }
 
 core::buffer::SendBufferRef HttpResponse::NoContent(

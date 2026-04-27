@@ -72,6 +72,7 @@ public:
     void Route(HttpMethod method, std::string path, HttpHandler handler);
     void RouteStream(HttpMethod method, std::string path,
                      HttpStreamHandler handler);
+    void Use(HttpMiddleware middleware);
 
     void Get(std::string path, HttpHandler handler) {
         Route(HttpMethod::kGet, std::move(path), std::move(handler));

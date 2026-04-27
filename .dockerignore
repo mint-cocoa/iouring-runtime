@@ -2,10 +2,12 @@
 .github
 build
 build-*
+cmake-build-*
 benchmark-results
 deploy
 docs
 *.md
+**/*.log
 !.dockerignore
 !README.md
 .DS_Store

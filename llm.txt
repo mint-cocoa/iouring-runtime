@@ -1,0 +1,67 @@
+  1. 앱 목적
+  2. 기술 스택
+  3. 실행 방법
+  4. Docker 빌드 방식
+  5. 배포 대상
+  6. 도메인/경로
+  7. 환경변수/Secret
+  8. 데이터 저장 여부
+  9. GitHub Actions 방식
+  10. GitOps repo 반영 방식
+
+  배포 환경:
+  - Kubernetes k3s 홈랩
+  - ingress-nginx 사용
+  - MetalLB IP는 172.30.1.240
+  - 외부 프록시는 k8s.mintcocoa.cc를 172.30.1.240:80으로 전달
+  - 이 앱 도메인은 <appname>.k8s.mintcocoa.cc
+
+  CI/CD:
+  - GitHub Actions로 Docker image를 ghcr.io/mint-cocoa/<appname>:${GITHUB_SHA} 로 push
+  - GitOps repo는 mint-cocoa/home-k8s-gitops
+  - GitOps repo의 apps/todo-app/values.yaml image.tag를 업데이트
+  - Argo CD가 자동 sync함
+
+  요구사항:
+  - Dockerfile 작성
+  - .dockerignore 작성
+  - GitHub Actions workflow 작성
+  - README에 로컬 실행/배포 흐름 작성
+  - 앱이 /healthz 엔드포인트를 제공
+
+  GitOps repo 구조:
+  - clusters/home/<app-name>-application.yaml
+  - apps/<app-name>/Chart.yaml
+  - apps/<app-name>/values.yaml
+  - apps/<app-name>/templates/deployment.yaml
+  - apps/<app-name>/templates/service.yaml
+  - apps/<app-name>/templates/ingress.yaml
+
+  Ingress:
+  - host: <appname>.k8s.mintcocoa.cc
+  - path: /
+  - service port: 80
+  - container port: 3000
+
+
+  - 클러스터에 직접 kubectl apply하지 말 것
+  - GitOps repo를 수정해서 Argo CD가 배포하게 할 것
+  - image tag는 latest만 쓰지 말고 commit SHA를 쓸 것
+  - Secret 값을 repo에 커밋하지 말 것
+  - 앱이 subpath가 아니라 root path / 에서 동작하게 할 것
+  - ingress host를 명시할 것
+
+  앱 코드, Dockerfile, GitHub Actions를 만들어줘.
+  이미지는 ghcr.io/mint-cocoa/<app>:${GITHUB_SHA} 로 push하게 해줘.
+  배포는 GitOps repo의 values.yaml tag를 수정하는 방식으로 해줘.
+
+  cluster:
+    name: home
+    distro: k3s
+    ingressClass: nginx
+    loadBalancerIP: 172.30.1.240
+    gitopsRepo: mint-cocoa/home-k8s-gitops
+    registry: ghcr.io/mint-cocoa
+    domainPattern: "*.k8s.mintcocoa.cc"
+    deployMethod: argocd
+    imageTagPolicy: git-sha

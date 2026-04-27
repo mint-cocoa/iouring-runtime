@@ -1,9 +1,11 @@
 local paths = {
   "/",
   "/health",
+  "/payload/256b",
   "/",
-  "/",
+  "/payload/4k",
   "/health",
+  "/payload/64k",
 }
 
 local index = 0

@@ -26,6 +26,11 @@ public:
                 std::chrono::milliseconds request_timeout = {});
 
     void SendResponse(core::buffer::SendBufferRef buf);
+    bool StartFileStream(core::buffer::SendBufferRef header,
+                         int file_fd,
+                         std::uint64_t file_size,
+                         std::uint32_t chunk_size,
+                         std::uint32_t max_chunks_per_write);
     static std::string GenerateRequestId();
 
 protected:
@@ -33,6 +38,7 @@ protected:
     void OnDisconnected() final;
     bool HasPendingAppWork() const final;
     bool OnTimeoutTick(std::chrono::steady_clock::time_point now) final;
+    void OnSocketDrained() final;
 
 private:
     friend class DeferredResponse;
@@ -42,6 +48,14 @@ private:
         HttpRequest* request = nullptr;
         std::unique_ptr<HttpResponse> response;
         bool rejected = false;
+    };
+
+    struct FileStreamState {
+        core::io::SocketHandle fd;
+        std::uint64_t remaining_bytes = 0;
+        std::uint32_t chunk_size = 256 * 1024;
+        std::uint32_t max_chunks_per_write = 4;
+        bool active = false;
     };
 
     void HandleHttpRecv(const std::byte* data, std::uint32_t len);
@@ -56,10 +70,13 @@ private:
     void BeginDeferredResponse();
     void EndDeferredResponse();
     bool ActiveStreamResponseSent() const;
+    bool PumpFileStream();
+    void ResetFileStream();
 
     const Router& router_;
     HttpParser parser_;
     core::buffer::RecvBuffer recv_buffer_;
+    FileStreamState file_stream_;
     std::chrono::milliseconds request_timeout_{0};
     std::chrono::steady_clock::time_point request_started_at_{};
     StreamingRequestState active_stream_;
