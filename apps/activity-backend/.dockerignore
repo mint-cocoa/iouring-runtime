@@ -1,0 +1,12 @@
+.git
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.mypy_cache/
+**/.venv/
+**/venv/
+**/downloads/
+**/cookie.txt
+**/*.cookie
+**/*.cookies
+**/.env
