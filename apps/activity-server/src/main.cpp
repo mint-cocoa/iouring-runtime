@@ -31,6 +31,8 @@
 #include <utility>
 #include <vector>
 
+#include <sys/wait.h>
+
 namespace core = iouring_runtime::core;
 namespace io = iouring_runtime::core::io;
 namespace ring = iouring_runtime::core::ring;
@@ -126,6 +128,22 @@ std::string UrlDecode(std::string_view text) {
             }
         }
         out += text[i];
+    }
+    return out;
+}
+
+std::string UrlEncode(std::string_view text) {
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(text.size() * 3);
+    for (const unsigned char ch : text) {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            out += static_cast<char>(ch);
+        } else {
+            out += '%';
+            out += kHex[ch >> 4];
+            out += kHex[ch & 0x0f];
+        }
     }
     return out;
 }
@@ -262,6 +280,140 @@ int RunCommand(const std::string& command) {
     return std::system(command.c_str());
 }
 
+struct CommandResult {
+    int exit_code = -1;
+    std::string output;
+};
+
+CommandResult RunCommandCapture(const std::string& command) {
+    CommandResult result;
+    FILE* pipe = ::popen(command.c_str(), "r");
+    if (!pipe) {
+        return result;
+    }
+
+    char buffer[8192];
+    while (true) {
+        const auto n = std::fread(buffer, 1, sizeof(buffer), pipe);
+        if (n > 0) {
+            result.output.append(buffer, n);
+        }
+        if (n < sizeof(buffer)) {
+            if (std::feof(pipe)) break;
+            if (std::ferror(pipe)) break;
+        }
+    }
+
+    const int status = ::pclose(pipe);
+    if (status >= 0 && WIFEXITED(status)) {
+        result.exit_code = WEXITSTATUS(status);
+    }
+    return result;
+}
+
+bool IsHttpUrl(std::string_view url) {
+    return url.starts_with("http://") || url.starts_with("https://");
+}
+
+std::string OriginOf(std::string_view url) {
+    const auto scheme = url.find("://");
+    if (scheme == std::string_view::npos) return {};
+    const auto host_start = scheme + 3;
+    const auto path_start = url.find('/', host_start);
+    return std::string(url.substr(0, path_start == std::string_view::npos
+        ? std::string_view::npos
+        : path_start));
+}
+
+std::string ResolveUrl(std::string_view base, std::string_view value) {
+    if (IsHttpUrl(value)) {
+        return std::string(value);
+    }
+    const auto origin = OriginOf(base);
+    if (value.starts_with("//")) {
+        const auto scheme = base.substr(0, base.find(':'));
+        return std::string(scheme) + ":" + std::string(value);
+    }
+    if (value.starts_with('/')) {
+        return origin + std::string(value);
+    }
+
+    const auto slash = base.rfind('/');
+    if (slash == std::string_view::npos || base.substr(0, slash).find("://") == std::string_view::npos) {
+        return origin + "/" + std::string(value);
+    }
+    return std::string(base.substr(0, slash + 1)) + std::string(value);
+}
+
+std::string ProxyHlsUrl(std::string_view remote_url) {
+    return "/proxy/hls?url=" + UrlEncode(remote_url);
+}
+
+bool ShouldProxyManifestUri(std::string_view uri) {
+    return !uri.empty() && !uri.starts_with("data:");
+}
+
+std::string RewriteHlsManifest(std::string_view text, std::string_view base_url) {
+    std::istringstream in{std::string(text)};
+    std::ostringstream out;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        if (line.empty()) {
+            out << "\n";
+            continue;
+        }
+
+        if (line.starts_with("#")) {
+            std::string rewritten = line;
+            std::size_t pos = 0;
+            while ((pos = rewritten.find("URI=\"", pos)) != std::string::npos) {
+                const auto start = pos + 5;
+                const auto end = rewritten.find('"', start);
+                if (end == std::string::npos) break;
+                const auto uri = rewritten.substr(start, end - start);
+                if (ShouldProxyManifestUri(uri)) {
+                    const auto resolved = ResolveUrl(base_url, uri);
+                    const auto proxied = ProxyHlsUrl(resolved);
+                    rewritten.replace(start, end - start, proxied);
+                    pos = start + proxied.size();
+                } else {
+                    pos = end + 1;
+                }
+            }
+            out << rewritten << "\n";
+            continue;
+        }
+
+        out << ProxyHlsUrl(ResolveUrl(base_url, line)) << "\n";
+    }
+    return out.str();
+}
+
+CommandResult CurlGet(std::string_view url, std::string_view extra_args = {}) {
+    return RunCommandCapture("curl -LfsS --max-time 30 -A " +
+                             ShellQuote("Mozilla/5.0 Cocoatube/1.0") + " " +
+                             std::string(extra_args) + " " + ShellQuote(url) +
+                             " 2>/dev/null");
+}
+
+std::string ContentTypeForUrl(std::string_view url) {
+    const auto lower = Lower(url);
+    if (lower.ends_with(".m3u8")) return "application/vnd.apple.mpegurl";
+    if (lower.ends_with(".mpd")) return "application/dash+xml";
+    if (lower.ends_with(".ts")) return "video/mp2t";
+    if (lower.ends_with(".m4s")) return "video/iso.segment";
+    if (lower.ends_with(".mp4")) return "video/mp4";
+    if (lower.ends_with(".jpg") || lower.ends_with(".jpeg")) return "image/jpeg";
+    if (lower.ends_with(".png")) return "image/png";
+    if (lower.ends_with(".webp")) return "image/webp";
+    if (lower.ends_with(".gif")) return "image/gif";
+    return "application/octet-stream";
+}
+
 struct HttpRequest {
     std::string method;
     std::string target;
@@ -270,6 +422,11 @@ struct HttpRequest {
     std::unordered_map<std::string, std::string> headers;
     std::string body;
 };
+
+std::string Header(const HttpRequest& req, std::string_view name) {
+    const auto it = req.headers.find(std::string(name));
+    return it == req.headers.end() ? std::string{} : it->second;
+}
 
 struct QueueEntry {
     std::string id;
@@ -298,6 +455,7 @@ struct DownloadTask {
     std::string error;
     QueueEntry entry;
     int progress = 0;
+    bool force_play = false;
 };
 
 class ActivitySession;
@@ -313,7 +471,8 @@ public:
     void BroadcastPresence(std::string_view instance_id);
     std::string QueueJson(std::string_view instance_id);
     std::string StatePayloadJson(std::string_view instance_id);
-    std::string CreateDownload(std::string url, std::string instance_id);
+    std::string CreateDownload(std::string url, std::string instance_id,
+                               bool force_play = false);
     std::string TaskJson(std::string_view task_id);
 
 private:
@@ -456,6 +615,24 @@ private:
                      "\",\"message\":\"Download started in background\"}");
             return;
         }
+        if (req.method == "POST" && req.path == "/api/play") {
+            const auto url = JsonString(req.body, "url").value_or("");
+            const auto instance_id = JsonString(req.body, "instance_id").value_or("default");
+            if (url.empty()) {
+                SendHttp(400, "application/json", "{\"detail\":\"url is required\"}");
+                return;
+            }
+            const auto task_id = g_hub.CreateDownload(
+                url, instance_id.empty() ? "default" : instance_id, true);
+            SendHttp(200, "application/json",
+                     "{\"status\":\"pending\",\"task_id\":\"" + JsonEscape(task_id) +
+                     "\",\"message\":\"Playback download started in background\"}");
+            return;
+        }
+        if (req.method == "POST" && req.path == "/api/discord/token") {
+            ExchangeDiscordToken(req.body);
+            return;
+        }
         if (req.method == "GET" && req.path.rfind("/api/download/status/", 0) == 0) {
             const auto task_id = req.path.substr(std::string("/api/download/status/").size());
             const auto body = g_hub.TaskJson(task_id);
@@ -476,6 +653,21 @@ private:
         }
         if (req.method == "GET" && req.path.rfind("/hls/", 0) == 0) {
             ServeHls(req.path);
+            return;
+        }
+        if ((req.method == "GET" || req.method == "HEAD") && req.path == "/api/thumb") {
+            ProxyThumbnail(req);
+            return;
+        }
+        if ((req.method == "GET" || req.method == "HEAD") && req.path == "/proxy/hls") {
+            ProxyHls(req);
+            return;
+        }
+        if (req.path.rfind("/proxy/netflix/", 0) == 0 ||
+            req.path.rfind("/proxy/webrtc/", 0) == 0 ||
+            req.path.rfind("/api/tving/", 0) == 0) {
+            SendHttp(501, "application/json",
+                     "{\"detail\":\"This FastAPI route is not ported to the C++ activity server yet\"}");
             return;
         }
         if (req.method == "GET" && req.path == "/healthz") {
@@ -613,13 +805,18 @@ private:
     void AdvanceQueue(const std::string& instance_id);
     void RemoveQueue(std::string_view body);
     void ServeHls(const std::string& path);
+    void ProxyThumbnail(const HttpRequest& req);
+    void ProxyHls(const HttpRequest& req);
+    void ExchangeDiscordToken(std::string_view body);
 
     void SendHttp(int status, std::string_view content_type, std::string body) {
         std::string reason = "OK";
         if (status == 400) reason = "Bad Request";
         if (status == 404) reason = "Not Found";
         if (status == 431) reason = "Request Header Fields Too Large";
-        if (status >= 500) reason = "Internal Server Error";
+        if (status == 501) reason = "Not Implemented";
+        if (status == 502) reason = "Bad Gateway";
+        if (status >= 500 && reason == "OK") reason = "Internal Server Error";
         std::ostringstream out;
         out << "HTTP/1.1 " << status << ' ' << reason << "\r\n"
             << "Server: iouring_activity_server\r\n"
@@ -836,13 +1033,15 @@ std::string ActivityHub::QueueJson(std::string_view instance_id) {
     return out;
 }
 
-std::string ActivityHub::CreateDownload(std::string url, std::string instance_id) {
+std::string ActivityHub::CreateDownload(std::string url, std::string instance_id,
+                                        bool force_play) {
     const auto task_id = RandomId("dl_");
     {
         std::lock_guard lock(mu_);
         DownloadTask task;
         task.id = task_id;
         task.url = std::move(url);
+        task.force_play = force_play;
         tasks_[task_id] = std::move(task);
     }
     std::thread([this, task_id, instance_id = std::move(instance_id)] {
@@ -947,15 +1146,17 @@ void ActivityHub::DownloadWorker(std::string task_id, std::string instance_id) {
     entry.title = url;
 
     bool autostart = false;
+    bool force_play = false;
     {
         std::lock_guard lock(mu_);
         auto& task = tasks_[task_id];
         task.status = "completed";
         task.progress = 100;
         task.entry = entry;
+        force_play = task.force_play;
 
         auto& state = StateLocked(instance_id);
-        if (state.current_video_url.empty() && !state.is_playing) {
+        if (force_play || (state.current_video_url.empty() && !state.is_playing)) {
             state.current_video_url = entry.url;
             state.metadata = entry;
             state.is_playing = true;
@@ -1024,6 +1225,100 @@ void ActivitySession::ServeHls(const std::string& path) {
     if (target.extension() == ".m3u8") type = "application/vnd.apple.mpegurl";
     if (target.extension() == ".ts") type = "video/mp2t";
     SendHttp(200, type, body);
+}
+
+void ActivitySession::ProxyThumbnail(const HttpRequest& req) {
+    const auto target = QueryParam(req.query, "target");
+    if (target.empty()) {
+        SendHttp(400, "application/json", "{\"detail\":\"target is required\"}");
+        return;
+    }
+    if (!IsHttpUrl(target)) {
+        SendHttp(400, "application/json", "{\"detail\":\"Only http(s) targets supported\"}");
+        return;
+    }
+
+    if (req.method == "HEAD") {
+        SendHttp(200, ContentTypeForUrl(target), "");
+        return;
+    }
+
+    const auto upstream = CurlGet(target, "--max-time 10");
+    if (upstream.exit_code != 0) {
+        SendHttp(502, "application/json", "{\"detail\":\"Thumbnail upstream request failed\"}");
+        return;
+    }
+    SendHttp(200, ContentTypeForUrl(target), upstream.output);
+}
+
+void ActivitySession::ProxyHls(const HttpRequest& req) {
+    const auto url = QueryParam(req.query, "url");
+    if (url.empty()) {
+        SendHttp(400, "application/json", "{\"detail\":\"url is required\"}");
+        return;
+    }
+    if (!IsHttpUrl(url)) {
+        SendHttp(400, "application/json", "{\"detail\":\"Only http/https URLs are supported\"}");
+        return;
+    }
+
+    if (req.method == "HEAD") {
+        SendHttp(200, ContentTypeForUrl(url), "");
+        return;
+    }
+
+    std::string extra_args;
+    if (const auto range = Header(req, "range"); !range.empty()) {
+        extra_args += "-H " + ShellQuote("Range: " + range);
+    }
+
+    const auto upstream = CurlGet(url, extra_args);
+    if (upstream.exit_code != 0) {
+        SendHttp(502, "application/json", "{\"detail\":\"Upstream request failed\"}");
+        return;
+    }
+
+    const auto content_type = ContentTypeForUrl(url);
+    if (content_type == "application/vnd.apple.mpegurl" ||
+        upstream.output.starts_with("#EXTM3U")) {
+        SendHttp(200, "application/vnd.apple.mpegurl; charset=utf-8",
+                 RewriteHlsManifest(upstream.output, url));
+        return;
+    }
+    SendHttp(200, content_type, upstream.output);
+}
+
+void ActivitySession::ExchangeDiscordToken(std::string_view body) {
+    const auto code = JsonString(body, "code").value_or("");
+    if (code.empty()) {
+        SendHttp(400, "application/json", "{\"detail\":\"code is required\"}");
+        return;
+    }
+
+    const auto client_id = EnvString("DISCORD_CLIENT_ID", "");
+    const auto client_secret = EnvString("DISCORD_CLIENT_SECRET", "");
+    if (client_id.empty() || client_secret.empty()) {
+        SendHttp(500, "application/json",
+                 "{\"detail\":\"Server misconfigured (missing Discord credentials)\"}");
+        return;
+    }
+
+    const std::string command =
+        "curl -fsS --max-time 20 -X POST " +
+        ShellQuote("https://discord.com/api/oauth2/token") +
+        " -H " + ShellQuote("Content-Type: application/x-www-form-urlencoded") +
+        " --data-urlencode " + ShellQuote("client_id=" + client_id) +
+        " --data-urlencode " + ShellQuote("client_secret=" + client_secret) +
+        " --data-urlencode " + ShellQuote("grant_type=authorization_code") +
+        " --data-urlencode " + ShellQuote("code=" + code) +
+        " 2>/dev/null";
+
+    const auto upstream = RunCommandCapture(command);
+    if (upstream.exit_code != 0) {
+        SendHttp(400, "application/json", "{\"detail\":\"Failed to exchange token\"}");
+        return;
+    }
+    SendHttp(200, "application/json", upstream.output);
 }
 
 } // namespace

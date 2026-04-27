@@ -9,15 +9,19 @@ surface used by the current frontend:
 - `GET /healthz`
 - `GET /api/queue`
 - `POST /api/download`
+- `POST /api/play`
 - `GET /api/download/status/{task_id}`
+- `POST /api/discord/token`
 - `POST /api/next`
 - `POST /api/queue/remove`
+- `GET /api/thumb`
 - `GET /hls/{video_id}/{path}`
+- `GET|HEAD /proxy/hls`
 - `GET /ws` WebSocket with `HELLO`, anonymous `CHAT_MESSAGE`, and state updates
 
 `yt-dlp` and `ffmpeg` are executed as subprocesses for media ingest and HLS
-packaging. TVING cookie playback and the generic `/proxy/*` helpers still need
-to be ported before the Python backend can be deleted completely.
+packaging. TVING cookie playback, Netflix proxying, and WebRTC proxying still
+need to be ported before the Python backend can be deleted completely.
 
 ## Local Run
 

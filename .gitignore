@@ -9,3 +9,4 @@ __pycache__/
 *.pem
 *.key
 *.p12
+.env

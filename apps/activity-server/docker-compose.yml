@@ -12,6 +12,8 @@ services:
       ACTIVITY_HOST: 0.0.0.0
       ACTIVITY_PORT: "8000"
       ACTIVITY_DOWNLOAD_DIR: /var/lib/iouring-runtime/activity-server/downloads
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
     ports:
       - "8000:8000"
     volumes:
