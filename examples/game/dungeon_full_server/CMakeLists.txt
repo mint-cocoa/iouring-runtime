@@ -22,7 +22,6 @@ endforeach()
 
 add_executable(dungeon_full_server
     src/main.cpp
-    src/net/packet_session.cpp
     src/net/io_worker.cpp
     src/net/io_worker_pool.cpp
     src/game/player_context.cpp
@@ -52,7 +51,7 @@ target_include_directories(dungeon_full_server PRIVATE
 )
 
 target_link_libraries(dungeon_full_server PRIVATE
-    Runtime
+    RuntimeGame
     spdlog::spdlog
     protobuf::libprotobuf
 )

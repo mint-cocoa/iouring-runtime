@@ -1,8 +1,7 @@
 #pragma once
 
-#include "packet_session.h"
-#include "packet_builder.h"
 #include "../types.h"
+#include <iouring_runtime/game/PacketSession.h>
 #include <iouring_runtime/core/Types.h>
 
 class IoWorker;
@@ -19,7 +18,7 @@ enum class SessionState {
     InRoom,
 };
 
-class GameSession : public PacketSession {
+class GameSession : public iouring_runtime::game::PacketSession {
 public:
     GameSession(int fd,
                 iouring_runtime::core::ring::IoRing& ring,
@@ -44,8 +43,8 @@ public:
 
     template<iouring_runtime::core::ProtobufMessage T>
     void SendPacket(MsgId msg_id, const T& proto) {
-        auto buf = PacketBuilder::Build(Pool(), msg_id, proto);
-        if (buf) Send(std::move(buf));
+        iouring_runtime::game::PacketSession::SendPacket(
+            static_cast<iouring_runtime::game::PacketId>(msg_id), proto);
     }
 
 protected:

@@ -10,12 +10,12 @@
 #include "Common.pb.h"
 #include "Inventory.pb.h"
 
-Room::Room(RoomId id, const std::string& name,
+#include <utility>
+
+Room::Room(RoomId id, std::string name,
            iouring_runtime::core::job::GlobalQueue& gq,
            IoWorkerPool* workers)
-    : JobQueue(gq)
-    , id_(id)
-    , name_(name)
+    : iouring_runtime::game::Room(id, std::move(name), gq)
     , workers_(workers)
 {
 }
@@ -102,20 +102,21 @@ void Room::AddPlayer(PlayerContext* ctx, float spawn_x, float spawn_y, float spa
     // NOT receive the initial snapshot — that is sent by HandleSceneReady.
 
     players_[ps.player_id] = std::move(ps);
+    iouring_runtime::game::Room::AddPlayer({ctx->player_id});
     ClearEmpty();
     spdlog::info("Room[{}]: player {} joined at ({:.1f},{:.1f},{:.1f}), count={}",
-                 id_, ctx->player_id, spawn_x, spawn_y, spawn_z, players_.size());
+                 Id(), ctx->player_id, spawn_x, spawn_y, spawn_z, players_.size());
 }
 
 void Room::HandleSceneReady(PlayerId pid) {
     auto it = players_.find(pid);
     if (it == players_.end()) {
-        spdlog::warn("Room[{}]: HandleSceneReady for unknown player {}", id_, pid);
+        spdlog::warn("Room[{}]: HandleSceneReady for unknown player {}", Id(), pid);
         return;
     }
     auto& ps = it->second;
     if (ps.scene_ready) {
-        spdlog::debug("Room[{}]: player {} already scene_ready", id_, pid);
+        spdlog::debug("Room[{}]: player {} already scene_ready", Id(), pid);
         return;
     }
     ps.scene_ready = true;
@@ -160,7 +161,7 @@ void Room::HandleSceneReady(PlayerId pid) {
     BroadcastExcept(pid, MsgId::S_SPAWN, spawn_msg);
 
     spdlog::debug("Room[{}]: player {} scene_ready, snapshot sent ({} entities)",
-                  id_, pid, list_msg.players_size());
+                  Id(), pid, list_msg.players_size());
 }
 
 void Room::RemovePlayer(PlayerId pid) {
@@ -168,20 +169,25 @@ void Room::RemovePlayer(PlayerId pid) {
     if (it == players_.end()) return;
 
     players_.erase(it);
+    iouring_runtime::game::Room::RemovePlayer(pid);
 
     game::S_Despawn despawn_msg;
     despawn_msg.set_player_id(pid);
     BroadcastAll(MsgId::S_DESPAWN, despawn_msg);
 
     if (players_.empty()) MarkEmpty();
-    spdlog::info("Room[{}]: player {} left, count={}", id_, pid, players_.size());
+    spdlog::info("Room[{}]: player {} left, count={}", Id(), pid, players_.size());
 }
 
-void Room::HandlePacket(PlayerId pid, std::uint16_t msg_id,
-                        const std::byte* data, std::uint32_t len) {
+void Room::OnPacket(iouring_runtime::game::PlayerState& player,
+                    iouring_runtime::game::PacketId msg_id,
+                    std::span<const std::byte> payload) {
+    const auto pid = player.player_id;
     auto it = players_.find(pid);
     if (it == players_.end()) return;
     auto& ps = it->second;
+    const auto* data = payload.data();
+    const auto len = static_cast<std::uint32_t>(payload.size());
 
     switch (static_cast<MsgId>(msg_id)) {
         case MsgId::C_SCENE_READY:  HandleSceneReady(pid); break;
@@ -195,7 +201,8 @@ void Room::HandlePacket(PlayerId pid, std::uint16_t msg_id,
         case MsgId::C_PICKUP:       handler::HandlePickup(*this, ps, data, len); break;
         case MsgId::C_USE_ITEM:     handler::HandleUseItem(*this, ps, data, len); break;
         default:
-            spdlog::warn("Room[{}]: unhandled packet msg_id={} from player={}", id_, msg_id, pid);
+            spdlog::warn("Room[{}]: unhandled packet msg_id={} from player={}",
+                         Id(), msg_id, pid);
             break;
     }
 }

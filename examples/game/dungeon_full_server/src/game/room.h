@@ -6,12 +6,12 @@
 #include "projectile_manager.h"
 #include "dungeon_generator.h"
 #include "Common.pb.h"
-#include <iouring_runtime/core/JobQueue.h>
 #include <iouring_runtime/core/JobTimer.h>
 #include <iouring_runtime/core/SendBuffer.h>
 #include <iouring_runtime/core/IoRing.h>
 #include <iouring_runtime/core/Concepts.h>
-#include "../net/packet_builder.h"
+#include <iouring_runtime/game/PacketBuilder.h>
+#include <iouring_runtime/game/Room.h>
 #include <unordered_map>
 #include <string>
 
@@ -60,14 +60,14 @@ struct GroundItem {
     float lifetime = 15.0f;  // 15초 후 소멸
 };
 
-class Room : public iouring_runtime::core::job::JobQueue {
+class Room : public iouring_runtime::game::Room {
 public:
-    Room(RoomId id, const std::string& name,
+    Room(RoomId id, std::string name,
          iouring_runtime::core::job::GlobalQueue& gq,
          IoWorkerPool* workers);
 
-    RoomId             Id()   const { return id_; }
-    const std::string& Name() const { return name_; }
+    RoomId             Id()   const { return iouring_runtime::game::Room::Id(); }
+    const std::string& Name() const { return iouring_runtime::game::Room::Name(); }
     std::uint32_t      PlayerCount() const { return static_cast<std::uint32_t>(players_.size()); }
     bool               IsEmpty() const { return players_.empty(); }
     bool               IsFull() const { return players_.size() >= kMaxPlayers; }
@@ -85,9 +85,6 @@ public:
     // broadcasts their spawn to the rest of the room.
     void HandleSceneReady(PlayerId pid);
 
-    void HandlePacket(PlayerId pid, std::uint16_t msg_id,
-                      const std::byte* data, std::uint32_t len);
-
     void OnTick();
     void ScheduleTick(iouring_runtime::core::job::JobTimer& timer);
 
@@ -100,15 +97,18 @@ public:
 
     template<iouring_runtime::core::ProtobufMessage T>
     void SendTo(PlayerState& ps, MsgId msg_id, const T& proto) {
-        SendTo(ps, msg_id, PacketBuilder::Build(GetPool(), msg_id, proto));
+        SendTo(ps, msg_id, iouring_runtime::game::PacketBuilder::Build(
+            GetPool(), static_cast<iouring_runtime::game::PacketId>(msg_id), proto));
     }
     template<iouring_runtime::core::ProtobufMessage T>
     void BroadcastAll(MsgId msg_id, const T& proto) {
-        BroadcastAll(msg_id, PacketBuilder::Build(GetPool(), msg_id, proto));
+        BroadcastAll(msg_id, iouring_runtime::game::PacketBuilder::Build(
+            GetPool(), static_cast<iouring_runtime::game::PacketId>(msg_id), proto));
     }
     template<iouring_runtime::core::ProtobufMessage T>
     void BroadcastExcept(PlayerId exclude, MsgId msg_id, const T& proto) {
-        BroadcastExcept(exclude, msg_id, PacketBuilder::Build(GetPool(), msg_id, proto));
+        BroadcastExcept(exclude, msg_id, iouring_runtime::game::PacketBuilder::Build(
+            GetPool(), static_cast<iouring_runtime::game::PacketId>(msg_id), proto));
     }
 
     iouring_runtime::core::buffer::BufferPool& GetPool();
@@ -138,14 +138,17 @@ public:
     bool TryPickup(PlayerId pid, uint64_t ground_id);
     std::unordered_map<uint64_t, GroundItem>& GroundItems() { return ground_items_; }
 
+protected:
+    void OnPacket(iouring_runtime::game::PlayerState& player,
+                  iouring_runtime::game::PacketId msg_id,
+                  std::span<const std::byte> payload) override;
+
 private:
     static constexpr std::uint32_t kMaxPlayers = 500;
     static constexpr auto kTickInterval = std::chrono::milliseconds(50);
     static constexpr int kScoreboardTicks = 100;  // 100 * 50ms = 5s
     int scoreboardCounter_ = 0;
 
-    RoomId id_;
-    std::string name_;
     std::unordered_map<PlayerId, PlayerState> players_;
     IoWorkerPool* workers_;
     iouring_runtime::core::job::JobTimer* timer_ = nullptr;

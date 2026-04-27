@@ -11,7 +11,7 @@ GameSession::GameSession(int fd,
                          iouring_runtime::core::ring::IoRing& ring,
                          iouring_runtime::core::buffer::BufferPool& pool,
                          IoWorker* worker)
-    : PacketSession(fd, ring, pool)
+    : iouring_runtime::game::PacketSession(fd, ring, pool)
     , worker_(worker)
 {
 }
@@ -85,10 +85,7 @@ void GameSession::HandleInRoomPacket(std::uint16_t msg_id,
 
     auto* room = player_ctx_->room;
     auto pid = player_ctx_->player_id;
-    auto buf = std::vector<std::byte>(data, data + len);
-
-    room->Push([room, pid, msg_id, buf = std::move(buf)] {
-        room->HandlePacket(pid, msg_id, buf.data(),
-                           static_cast<std::uint32_t>(buf.size()));
-    });
+    room->HandlePacket(pid,
+                       static_cast<iouring_runtime::game::PacketId>(msg_id),
+                       std::span<const std::byte>(data, len));
 }

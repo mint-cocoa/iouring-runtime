@@ -6,12 +6,14 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace iouring_runtime::game {
 
 struct PacketBuilder {
     static constexpr std::uint32_t kHeaderSize = 4;
-    static constexpr std::uint32_t kMaxPacketSize = 8192;
+    static constexpr std::uint32_t kMaxPacketSize =
+        std::numeric_limits<std::uint16_t>::max();
 
     template<core::ProtobufMessage T>
     static core::buffer::SendBufferRef Build(core::buffer::BufferPool& pool,

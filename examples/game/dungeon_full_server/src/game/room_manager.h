@@ -2,10 +2,7 @@
 
 #include "../types.h"
 #include "room.h"
-#include <unordered_map>
-#include <shared_mutex>
-#include <mutex>
-#include <memory>
+#include <iouring_runtime/game/RoomManager.h>
 #include <vector>
 
 class IoWorkerPool;
@@ -19,7 +16,7 @@ public:
     Room* FindRoom(RoomId id);
     void  RemoveRoom(RoomId id);
     void  CleanupEmptyRooms();
-    RoomId NextId() const { return next_id_; }
+    RoomId NextId() const { return rooms_.NextRoomId(); }
 
     struct RoomInfo {
         RoomId id;
@@ -29,10 +26,7 @@ public:
     std::vector<RoomInfo> GetRoomList();
 
 private:
-    mutable std::shared_mutex mutex_;
-    std::unordered_map<RoomId, std::shared_ptr<Room>> rooms_;
-    RoomId next_id_ = 1;
-    iouring_runtime::core::job::GlobalQueue& global_queue_;
+    iouring_runtime::game::RoomManager rooms_;
     iouring_runtime::core::job::JobTimer& timer_;
     IoWorkerPool* workers_;
 };

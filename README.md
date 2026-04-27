@@ -148,8 +148,8 @@ cmake --install build-game --prefix /tmp/iouring-runtime-install
   protobuf packet example for login, room list, room creation, and room join
   flow over the dungeon RPG wire protocol
 - `examples/game/dungeon_full_server/`
-  full dungeon RPG gameplay server port with SQLite or in-memory account,
-  character, inventory, and currency storage
+  full dungeon RPG gameplay server port layered on `RuntimeGame`, with SQLite
+  or in-memory account, character, inventory, and currency storage
 
 Build examples with:
 
