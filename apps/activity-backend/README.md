@@ -35,6 +35,29 @@ docker run --rm -p 8000:8000 \
   activity-backend
 ```
 
+## Production Compose
+
+The production compose file keeps the migrated backend on the existing
+`youtube-backend_default` Docker network with the `backend` alias, so the current
+frontend Nginx container can continue proxying `/api`, `/ws`, `/hls`, and
+`/proxy` without frontend changes.
+
+Required host files and directories:
+
+```bash
+sudo install -d -m 0750 /etc/iouring-runtime
+sudo install -d -m 0750 /var/lib/iouring-runtime/activity-backend/downloads
+sudo install -m 0600 activity-backend.env /etc/iouring-runtime/activity-backend.env
+sudo install -m 0640 cookie.txt /etc/iouring-runtime/activity-backend.cookie.txt
+```
+
+Deploy:
+
+```bash
+cd apps/activity-backend
+docker compose up -d --build backend
+```
+
 ## Reverse Proxy
 
 The intended cutover target is a dedicated backend route, for example:
