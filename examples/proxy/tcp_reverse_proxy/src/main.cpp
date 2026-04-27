@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstdlib>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -130,6 +131,43 @@ std::optional<std::pair<std::string, std::uint16_t>> ParseUpstreamTarget(
         host, static_cast<std::uint16_t>(port_value)};
 }
 
+std::optional<UpstreamRoute> ParseRouteAssignment(std::string_view token) {
+    const auto eq = token.find('=');
+    if (eq == std::string::npos) {
+        return std::nullopt;
+    }
+
+    auto hostname = Trim(token.substr(0, eq));
+    auto upstream = ParseUpstreamTarget(token.substr(eq + 1));
+    if (hostname.empty() || !upstream) {
+        return std::nullopt;
+    }
+
+    return UpstreamRoute{
+        .hostname = std::move(hostname),
+        .upstream_host = std::move(upstream->first),
+        .upstream_port = upstream->second,
+    };
+}
+
+void AppendRouteToken(std::vector<UpstreamRoute>& routes,
+                      std::string_view token,
+                      std::string_view source) {
+    const auto trimmed = Trim(token);
+    if (trimmed.empty()) {
+        return;
+    }
+
+    auto route = ParseRouteAssignment(trimmed);
+    if (!route) {
+        obs::LogWarn(kLogCategory,
+                     "tcp_reverse_proxy: ignoring invalid route '{}' from {}",
+                     trimmed, source);
+        return;
+    }
+    routes.push_back(std::move(*route));
+}
+
 std::vector<UpstreamRoute> ReadUpstreamRoutesEnv(const char* name) {
     std::vector<UpstreamRoute> routes;
     const char* raw = std::getenv(name);
@@ -140,34 +178,44 @@ std::vector<UpstreamRoute> ReadUpstreamRoutesEnv(const char* name) {
     std::stringstream ss(raw);
     std::string token;
     while (std::getline(ss, token, ',')) {
-        token = Trim(token);
-        if (token.empty()) {
-            continue;
+        AppendRouteToken(routes, token, name);
+    }
+
+    return routes;
+}
+
+std::vector<UpstreamRoute> ReadUpstreamRoutesFileEnv(const char* name) {
+    std::vector<UpstreamRoute> routes;
+    const char* raw_path = std::getenv(name);
+    if (!raw_path || std::string_view(raw_path).empty()) {
+        return routes;
+    }
+
+    const std::string path = raw_path;
+    std::ifstream file(path);
+    if (!file) {
+        obs::LogWarn(kLogCategory,
+                     "tcp_reverse_proxy: failed to open route config file '{}'",
+                     path);
+        return routes;
+    }
+
+    std::string line;
+    std::size_t line_no = 0;
+    while (std::getline(file, line)) {
+        ++line_no;
+
+        if (const auto comment = line.find('#');
+            comment != std::string::npos) {
+            line.erase(comment);
         }
 
-        const auto eq = token.find('=');
-        if (eq == std::string::npos) {
-            obs::LogWarn(kLogCategory,
-                         "tcp_reverse_proxy: ignoring invalid route '{}'",
-                         token);
-            continue;
+        std::stringstream ss(line);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            AppendRouteToken(routes, token,
+                             path + ":" + std::to_string(line_no));
         }
-
-        auto hostname = Trim(std::string_view(token).substr(0, eq));
-        auto upstream =
-            ParseUpstreamTarget(std::string_view(token).substr(eq + 1));
-        if (hostname.empty() || !upstream) {
-            obs::LogWarn(kLogCategory,
-                         "tcp_reverse_proxy: ignoring invalid route '{}'",
-                         token);
-            continue;
-        }
-
-        routes.push_back(UpstreamRoute{
-            .hostname = std::move(hostname),
-            .upstream_host = std::move(upstream->first),
-            .upstream_port = upstream->second,
-        });
     }
 
     return routes;
@@ -192,6 +240,10 @@ int main() {
         ReadUnsignedEnv<std::uint16_t>("TCP_PROXY_UPSTREAM_PORT", 8080);
     config.upstream_routes =
         ReadUpstreamRoutesEnv("TCP_PROXY_UPSTREAM_ROUTES");
+    auto file_routes =
+        ReadUpstreamRoutesFileEnv("TCP_PROXY_UPSTREAM_ROUTES_FILE");
+    config.upstream_routes.insert(config.upstream_routes.end(),
+                                  file_routes.begin(), file_routes.end());
     config.downstream_tls.certificate_chain_file =
         ReadStringEnv("TCP_PROXY_TLS_CERT_FILE",
                       config.downstream_tls.certificate_chain_file);
