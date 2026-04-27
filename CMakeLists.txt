@@ -272,6 +272,11 @@ if(BUILD_EXAMPLES)
     endforeach()
 endif()
 
+option(BUILD_ACTIVITY_SERVER "Build the C++ Activity backend server" ON)
+if(BUILD_ACTIVITY_SERVER)
+    add_subdirectory(apps/activity-server)
+endif()
+
 option(BUILD_TESTS "Build runtime tests" ON)
 if(BUILD_TESTS)
     enable_testing()
