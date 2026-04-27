@@ -54,9 +54,9 @@ building blocks rather than a high-level framework.
 
 Current runtime-facing examples:
 
-- `examples/runtime/core_echo/`
+- `app/examples/runtime/core_echo/`
   minimal runtime echo server
-- `examples/runtime/core_idle_echo/`
+- `app/examples/runtime/core_idle_echo/`
   echo server with inactivity watchdog and graceful close-after-flush behavior
 
 Build them with:

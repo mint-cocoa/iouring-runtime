@@ -3,11 +3,16 @@ cmake_minimum_required(VERSION 3.16)
 find_package(OpenSSL REQUIRED)
 
 add_executable(activity_server
+    src/ActivityHttp.cpp
+    src/ActivityHub.cpp
+    src/ActivitySession.cpp
+    src/ActivityUtils.cpp
     src/main.cpp
 )
 
 target_link_libraries(activity_server PRIVATE
     iouring_runtime::Runtime
+    iouring_runtime_media::RuntimeMedia
     OpenSSL::Crypto
 )
 

@@ -56,9 +56,9 @@ stay simple: one static HTML file, one CSS file, and no frontend build step.
 
 ### Implementation Plan
 
-- Add `examples/web/probe_board/`.
+- Add `app/examples/web/probe_board/`.
 - Build it only when `-DBUILD_WEB=ON -DBUILD_EXAMPLES=ON`.
-- Reuse the existing `WebServer` setup pattern from `examples/web/hello_http`.
+- Reuse the existing `WebServer` setup pattern from `app/examples/web/hello_http`.
 - Read config from environment variables:
   - `PROBE_BOARD_PORT`, default `3000`
   - `PROBE_BOARD_WORKERS`, default `1`
@@ -102,11 +102,11 @@ token or any secret value.
 Create these files in `mint-cocoa/home-k8s-gitops`:
 
 - `clusters/home/probe-board-application.yaml`
-- `apps/probe-board/Chart.yaml`
+- `app/probe-board/Chart.yaml`
 - `apps/probe-board/values.yaml`
-- `apps/probe-board/templates/deployment.yaml`
-- `apps/probe-board/templates/service.yaml`
-- `apps/probe-board/templates/ingress.yaml`
+- `app/probe-board/templates/deployment.yaml`
+- `app/probe-board/templates/service.yaml`
+- `app/probe-board/templates/ingress.yaml`
 
 Suggested values:
 

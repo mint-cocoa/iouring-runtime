@@ -23,7 +23,7 @@ uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --no-access-log
 ## Docker
 
 ```bash
-docker build -t activity-backend apps/activity-backend
+docker build -t activity-backend app/activity-backend
 docker run --rm -p 8000:8000 activity-backend
 ```
 
@@ -54,7 +54,7 @@ sudo install -m 0640 cookie.txt /etc/iouring-runtime/activity-backend.cookie.txt
 Deploy:
 
 ```bash
-cd apps/activity-backend
+cd app/activity-backend
 docker compose up -d --build backend
 ```
 

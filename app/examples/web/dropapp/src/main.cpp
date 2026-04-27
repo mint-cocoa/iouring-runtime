@@ -783,7 +783,7 @@ std::filesystem::path DefaultStaticRoot() {
     if (std::filesystem::is_regular_file(packaged / "index.html", ec)) {
         return packaged;
     }
-    return std::filesystem::path("examples/web/dropapp/static");
+    return std::filesystem::path("app/examples/web/dropapp/static");
 }
 
 std::optional<std::filesystem::path> SafeStaticPath(std::string_view raw_path) {

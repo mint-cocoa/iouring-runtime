@@ -34,7 +34,7 @@ RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nolog
     && chown -R webhook-inbox:webhook-inbox /data
 
 COPY --from=build /src/build/bin/webhook_inbox /usr/local/bin/webhook_inbox
-COPY --from=build /src/examples/web/webhook_inbox/static /usr/share/webhook-inbox/static
+COPY --from=build /src/app/examples/web/webhook_inbox/static /usr/share/webhook-inbox/static
 
 USER webhook-inbox
 ENV WEBHOOK_INBOX_HOST=0.0.0.0 \

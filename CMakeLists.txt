@@ -14,6 +14,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 set(IORUNTIME_PACKAGE_NAME iouring_runtime)
 set(IORUNTIME_OBSERVABILITY_PACKAGE_NAME iouring_runtime_observability)
+set(IORUNTIME_MEDIA_PACKAGE_NAME iouring_runtime_media)
 set(IORUNTIME_WEB_PACKAGE_NAME iouring_runtime_web)
 set(IORUNTIME_PROXY_PACKAGE_NAME iouring_runtime_proxy)
 set(IORUNTIME_GAME_PACKAGE_NAME iouring_runtime_game)
@@ -135,6 +136,21 @@ target_link_libraries(Runtime
 
 target_compile_options(Runtime PRIVATE -Wall -Wextra -Wpedantic)
 
+add_library(RuntimeMedia STATIC
+    src/modules/media/Hls.cpp
+)
+
+add_library(${IORUNTIME_MEDIA_PACKAGE_NAME}::RuntimeMedia ALIAS RuntimeMedia)
+add_library(iouring::RuntimeMedia ALIAS RuntimeMedia)
+
+target_include_directories(RuntimeMedia
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+
+target_compile_options(RuntimeMedia PRIVATE -Wall -Wextra -Wpedantic)
+
 if(BUILD_WEB)
     add_library(RuntimeWeb STATIC
         src/modules/web/HttpParser.cpp
@@ -233,35 +249,35 @@ endif()
 
 option(BUILD_EXAMPLES "Build runtime examples" ON)
 set(_EXAMPLE_DIRS
-    examples/runtime/core_echo
-    examples/runtime/core_idle_echo
+    app/examples/runtime/core_echo
+    app/examples/runtime/core_idle_echo
 )
 if(BUILD_WEB)
     list(APPEND _EXAMPLE_DIRS
-        examples/web/file_store_server
-        examples/web/dropapp
-        examples/web/hello_http
-        examples/web/speedtest_server
-        examples/web/status_server
-        examples/web/webhook_inbox
+        app/examples/web/file_store_server
+        app/examples/web/dropapp
+        app/examples/web/hello_http
+        app/examples/web/speedtest_server
+        app/examples/web/status_server
+        app/examples/web/webhook_inbox
     )
 endif()
 if(BUILD_PROXY)
     list(APPEND _EXAMPLE_DIRS
-        examples/proxy/tcp_reverse_proxy
+        app/examples/proxy/tcp_reverse_proxy
     )
 endif()
 if(BUILD_GAME)
     find_package(Protobuf QUIET)
     if(Protobuf_FOUND AND Protobuf_PROTOC_EXECUTABLE)
         list(APPEND _EXAMPLE_DIRS
-            examples/game/dungeon_packet_echo
-            examples/game/dungeon_full_server
+            app/examples/game/dungeon_packet_echo
+            app/examples/game/dungeon_full_server
         )
     else()
         message(WARNING
             "Protobuf library or protoc was not found; "
-            "skipping examples/game/dungeon_packet_echo")
+            "skipping app/examples/game/dungeon_packet_echo")
     endif()
 endif()
 if(BUILD_EXAMPLES)
@@ -274,7 +290,7 @@ endif()
 
 option(BUILD_ACTIVITY_SERVER "Build the C++ Activity backend server" ON)
 if(BUILD_ACTIVITY_SERVER)
-    add_subdirectory(apps/activity-server)
+    add_subdirectory(app/activity-server)
 endif()
 
 option(BUILD_TESTS "Build runtime tests" ON)
@@ -293,7 +309,7 @@ if(BUILD_TESTS)
 endif()
 
 install(
-    TARGETS Runtime RuntimeObservability
+    TARGETS Runtime RuntimeObservability RuntimeMedia
     EXPORT ${IORUNTIME_PACKAGE_NAME}Targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -310,6 +326,11 @@ if(BUILD_WEB)
         PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
 endif()
+
+install(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/media"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
+)
 
 if(BUILD_PROXY)
     install(

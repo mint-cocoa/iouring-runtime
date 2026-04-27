@@ -129,7 +129,7 @@ example entrypoint.
 The runtime is currently validated through:
 
 - focused unit tests under `tests/`
-- example programs under `examples/runtime/`
+- example programs under `app/examples/runtime/`
 - sanitizer rebuilds via `scripts/run_runtime_sanitizers.sh`
 
 Optional module behavior is covered by:
@@ -137,6 +137,6 @@ Optional module behavior is covered by:
 - HTTP tests under `tests/web/`
 - proxy tests under `tests/proxy/`
 - observability tests under `tests/observability/`
-- web, proxy, and game examples under `examples/web/`, `examples/proxy/`,
-  and `examples/game/`; the full dungeon RPG gameplay port lives under
-  `examples/game/dungeon_full_server/`
+- web, proxy, and game examples under `app/examples/web/`, `app/examples/proxy/`,
+  and `app/examples/game/`; the full dungeon RPG gameplay port lives under
+  `app/examples/game/dungeon_full_server/`

@@ -6,6 +6,10 @@ add_executable(test_observability_logging observability/test_logging.cpp)
 target_link_libraries(test_observability_logging PRIVATE RuntimeObservability GTest::gtest_main)
 add_test(NAME test_observability_logging COMMAND test_observability_logging)
 
+add_executable(test_media_hls media/test_hls.cpp)
+target_link_libraries(test_media_hls PRIVATE RuntimeMedia GTest::gtest_main)
+add_test(NAME test_media_hls COMMAND test_media_hls)
+
 add_executable(test_session_lifecycle io/test_session_lifecycle.cpp)
 target_link_libraries(test_session_lifecycle PRIVATE Runtime GTest::gtest_main)
 add_test(NAME test_session_lifecycle COMMAND test_session_lifecycle)

@@ -29,7 +29,7 @@ For local testing:
 cmake -S . -B build-webhook-inbox -DBUILD_WEB=ON -DBUILD_EXAMPLES=ON
 cmake --build build-webhook-inbox --target webhook_inbox
 WEBHOOK_INBOX_ROOT=/tmp/webhook-inbox WEBHOOK_INBOX_PORT=3000 \
-  WEBHOOK_INBOX_STATIC_ROOT=examples/web/webhook_inbox/static \
+  WEBHOOK_INBOX_STATIC_ROOT=app/examples/web/webhook_inbox/static \
   ./build-webhook-inbox/bin/webhook_inbox
 ```
 

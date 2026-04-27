@@ -34,7 +34,7 @@ cmake --build build-proxy -j$(nproc)
 
 ## Example
 
-The repository includes `examples/proxy/tcp_reverse_proxy/`.
+The repository includes `app/examples/proxy/tcp_reverse_proxy/`.
 
 ```bash
 TCP_PROXY_LISTEN_HOST=0.0.0.0 \
@@ -50,7 +50,7 @@ TCP_PROXY_CERTBOT_CHALLENGE_WEBROOT=/var/lib/letsencrypt \
 ```
 
 Deployment assets for the example live under
-`examples/proxy/tcp_reverse_proxy/deploy/`.
+`app/examples/proxy/tcp_reverse_proxy/deploy/`.
 
 ## Configuration Highlights
 
@@ -96,13 +96,13 @@ Install the example binary and deployment files:
 
 ```bash
 sudo install -D -m 0755 build-proxy/bin/tcp_reverse_proxy /usr/local/bin/tcp_reverse_proxy
-sudo install -D -m 0644 examples/proxy/tcp_reverse_proxy/deploy/tcp_reverse_proxy.service \
+sudo install -D -m 0644 app/examples/proxy/tcp_reverse_proxy/deploy/tcp_reverse_proxy.service \
   /etc/systemd/system/tcp_reverse_proxy.service
-sudo install -D -m 0644 examples/proxy/tcp_reverse_proxy/deploy/tcp_reverse_proxy.env.example \
+sudo install -D -m 0644 app/examples/proxy/tcp_reverse_proxy/deploy/tcp_reverse_proxy.env.example \
   /etc/iouring-runtime/tcp_reverse_proxy.env
-sudo install -D -m 0755 examples/proxy/tcp_reverse_proxy/deploy/certbot-issue.sh \
+sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-issue.sh \
   /usr/local/libexec/iouring-runtime/certbot-issue.sh
-sudo install -D -m 0755 examples/proxy/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
+sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
   /usr/local/libexec/iouring-runtime/certbot-renew-hook.sh
 ```
 
@@ -163,7 +163,7 @@ sudo systemctl restart tcp_reverse_proxy.service
 Hook renewals into `systemctl reload`:
 
 ```bash
-sudo install -D -m 0755 examples/proxy/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
+sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
   /etc/letsencrypt/renewal-hooks/deploy/tcp_reverse_proxy-reload.sh
 ```
 
@@ -180,9 +180,9 @@ and unit, then add a proxy route for the subdomain:
 
 ```bash
 sudo install -D -m 0755 build-proxy/bin/status_server /usr/local/bin/status_server
-sudo install -D -m 0644 examples/web/status_server/deploy/status_server.service \
+sudo install -D -m 0644 app/examples/web/status_server/deploy/status_server.service \
   /etc/systemd/system/status_server.service
-sudo install -D -m 0644 examples/web/status_server/deploy/status_server.env.example \
+sudo install -D -m 0644 app/examples/web/status_server/deploy/status_server.env.example \
   /etc/iouring-runtime/status_server.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now status_server.service
@@ -235,11 +235,11 @@ Install the binary, bundled static files, and unit:
 ```bash
 sudo install -D -m 0755 build-proxy/bin/speedtest_server /usr/local/bin/speedtest_server
 sudo install -d -m 0755 /usr/local/share/iouring-runtime/openspeedtest
-sudo cp -R examples/web/speedtest_server/public/. \
+sudo cp -R app/examples/web/speedtest_server/public/. \
   /usr/local/share/iouring-runtime/openspeedtest/
-sudo install -D -m 0644 examples/web/speedtest_server/deploy/speedtest_server.service \
+sudo install -D -m 0644 app/examples/web/speedtest_server/deploy/speedtest_server.service \
   /etc/systemd/system/speedtest_server.service
-sudo install -D -m 0644 examples/web/speedtest_server/deploy/speedtest_server.env.example \
+sudo install -D -m 0644 app/examples/web/speedtest_server/deploy/speedtest_server.env.example \
   /etc/iouring-runtime/speedtest_server.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now speedtest_server.service
@@ -266,9 +266,9 @@ Install the binary, environment file, and unit:
 ```bash
 sudo install -D -m 0755 build-proxy/bin/file_store_server /usr/local/bin/file_store_server
 sudo install -d -o tcp-proxy -g tcp-proxy -m 0755 /var/lib/iouring-runtime/files
-sudo install -D -m 0644 examples/web/file_store_server/deploy/file_store_server.service \
+sudo install -D -m 0644 app/examples/web/file_store_server/deploy/file_store_server.service \
   /etc/systemd/system/file_store_server.service
-sudo install -D -m 0644 examples/web/file_store_server/deploy/file_store_server.env.example \
+sudo install -D -m 0644 app/examples/web/file_store_server/deploy/file_store_server.env.example \
   /etc/iouring-runtime/file_store_server.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now file_store_server.service

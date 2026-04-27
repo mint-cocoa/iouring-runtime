@@ -53,7 +53,7 @@ The repository already has a strong starting point:
 - `src/ring/*`
 - `src/job/*`
 - `tests/io/*`
-- `examples/runtime/core_echo/`
+- `app/examples/runtime/core_echo/`
 
 The main remaining gap is not “missing runtime code” so much as “runtime
 identity is still easier to miss than the web framework layer”.

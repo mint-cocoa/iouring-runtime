@@ -3,7 +3,7 @@
 C++ io_uring backend for the Discord Activity video room.
 
 This is the migration target that replaces the temporary FastAPI
-`apps/activity-backend` service. The first C++ cut supports the core runtime
+`app/activity-backend` service. The first C++ cut supports the core runtime
 surface used by the current frontend:
 
 - `GET /healthz`
@@ -43,7 +43,7 @@ ACTIVITY_DOWNLOAD_DIR=/tmp/iouring-activity-server/downloads \
 ## Docker
 
 ```bash
-docker build -f apps/activity-server/Dockerfile -t iouring-runtime-activity-server:main .
+docker build -f app/activity-server/Dockerfile -t iouring-runtime-activity-server:main .
 docker run --rm -p 8010:8000 iouring-runtime-activity-server:main
 ```
 
@@ -56,6 +56,6 @@ frontend Nginx container can continue proxying to `http://backend:8000`.
 ```bash
 sudo install -d -m 0750 /var/lib/iouring-runtime/activity-server/downloads
 sudo chown -R 10002:10002 /var/lib/iouring-runtime/activity-server
-cd apps/activity-server
+cd app/activity-server
 sudo docker compose up -d --build backend
 ```

@@ -77,7 +77,7 @@ The runtime surface intentionally excludes:
   helpers for binary multiplayer protocols
 - `src/modules/observability/`
   logging implementation
-- `examples/runtime/`, `examples/web/`, `examples/proxy/`, `examples/game/`
+- `app/examples/runtime/`, `app/examples/web/`, `app/examples/proxy/`, `app/examples/game/`
   runnable examples for each layer
 - `tests/`
   focused tests grouped by runtime, modules, and protocol behavior
@@ -139,15 +139,15 @@ cmake --install build-game --prefix /tmp/iouring-runtime-install
 
 ## Examples
 
-- `examples/runtime/core_echo/`
-- `examples/runtime/core_idle_echo/`
-- `examples/web/dropapp/`
-- `examples/proxy/tcp_reverse_proxy/`
-  deployment assets: `examples/proxy/tcp_reverse_proxy/deploy/`
-- `examples/game/dungeon_packet_echo/`
+- `app/examples/runtime/core_echo/`
+- `app/examples/runtime/core_idle_echo/`
+- `app/examples/web/dropapp/`
+- `app/examples/proxy/tcp_reverse_proxy/`
+  deployment assets: `app/examples/proxy/tcp_reverse_proxy/deploy/`
+- `app/examples/game/dungeon_packet_echo/`
   protobuf packet example for login, room list, room creation, and room join
   flow over the dungeon RPG wire protocol
-- `examples/game/dungeon_full_server/`
+- `app/examples/game/dungeon_full_server/`
   full dungeon RPG gameplay server port layered on `RuntimeGame`, with SQLite
   or in-memory account, character, inventory, and currency storage
 
@@ -171,7 +171,7 @@ cmake -S . -B build-dropapp \
   -DBUILD_TESTS=OFF
 cmake --build build-dropapp --target dropapp -j$(nproc)
 DROPAPP_ROOT=/tmp/dropapp DROPAPP_PORT=3000 \
-  DROPAPP_STATIC_ROOT=examples/web/dropapp/static \
+  DROPAPP_STATIC_ROOT=app/examples/web/dropapp/static \
   ./build-dropapp/bin/dropapp
 ```
 
@@ -189,7 +189,7 @@ cmake -S . -B build-webhook-inbox \
   -DBUILD_TESTS=OFF
 cmake --build build-webhook-inbox --target webhook_inbox -j$(nproc)
 WEBHOOK_INBOX_ROOT=/tmp/webhook-inbox WEBHOOK_INBOX_PORT=3000 \
-  WEBHOOK_INBOX_STATIC_ROOT=examples/web/webhook_inbox/static \
+  WEBHOOK_INBOX_STATIC_ROOT=app/examples/web/webhook_inbox/static \
   ./build-webhook-inbox/bin/webhook_inbox
 ```
 

@@ -16,7 +16,7 @@ bare-metal Linux machine, see:
 
 ## Quick Start
 
-Run the default medium preset against `examples/web/hello_http`:
+Run the default medium preset against `app/examples/web/hello_http`:
 
 ```bash
 ./scripts/run_hello_http_wrk.sh

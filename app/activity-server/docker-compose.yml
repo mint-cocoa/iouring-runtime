@@ -2,7 +2,7 @@ services:
   backend:
     build:
       context: ../..
-      dockerfile: apps/activity-server/Dockerfile
+      dockerfile: app/activity-server/Dockerfile
     image: iouring-runtime-activity-server:main
     container_name: iouring-activity-backend
     restart: unless-stopped

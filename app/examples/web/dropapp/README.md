@@ -17,7 +17,7 @@ URL.
 
 The browser UI is served from `DROPAPP_STATIC_ROOT/index.html`. If the variable
 is not set, `dropapp` first tries `/usr/share/dropapp/static`, then the source
-tree path `examples/web/dropapp/static`.
+tree path `app/examples/web/dropapp/static`.
 
 For local testing:
 
@@ -25,7 +25,7 @@ For local testing:
 cmake -S . -B build-dropapp -DBUILD_WEB=ON -DBUILD_EXAMPLES=ON -DBUILD_TESTS=ON
 cmake --build build-dropapp --target dropapp
 DROPAPP_ROOT=/tmp/dropapp DROPAPP_PORT=3000 \
-  DROPAPP_STATIC_ROOT=examples/web/dropapp/static \
+  DROPAPP_STATIC_ROOT=app/examples/web/dropapp/static \
   ./build-dropapp/bin/dropapp
 ```
 

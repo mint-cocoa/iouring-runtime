@@ -27,9 +27,9 @@ For systemd deployment:
 ```bash
 sudo install -D -m 0755 build-proxy/bin/file_store_server /usr/local/bin/file_store_server
 sudo install -d -o tcp-proxy -g tcp-proxy -m 0755 /var/lib/iouring-runtime/files
-sudo install -D -m 0644 examples/web/file_store_server/deploy/file_store_server.service \
+sudo install -D -m 0644 app/examples/web/file_store_server/deploy/file_store_server.service \
   /etc/systemd/system/file_store_server.service
-sudo install -D -m 0644 examples/web/file_store_server/deploy/file_store_server.env.example \
+sudo install -D -m 0644 app/examples/web/file_store_server/deploy/file_store_server.env.example \
   /etc/iouring-runtime/file_store_server.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now file_store_server.service

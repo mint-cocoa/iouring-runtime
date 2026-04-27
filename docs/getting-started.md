@@ -13,8 +13,8 @@ build directly on `io_uring`.
 
 ## First examples
 
-- `examples/runtime/core_echo/`
-- `examples/runtime/core_idle_echo/`
+- `app/examples/runtime/core_echo/`
+- `app/examples/runtime/core_idle_echo/`
 
 ## Build
 
