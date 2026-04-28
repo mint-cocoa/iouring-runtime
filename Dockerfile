@@ -19,6 +19,7 @@ RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_WEB=ON \
         -DBUILD_EXAMPLES=ON \
+        -DBUILD_ACTIVITY_SERVER=OFF \
         -DBUILD_TESTS=OFF \
     && cmake --build build --target dropapp
 
