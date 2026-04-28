@@ -1,4 +1,8 @@
-# Example App Ideas
+# Archived Example App Ideas
+
+This file is kept as historical planning context. Active usage documentation
+lives in `README.md`, `docs/getting-started.md`, and
+`docs/usage-examples.md`.
 
 `llm.txt` describes the deployment contract for an app that will run on the
 home k3s cluster:

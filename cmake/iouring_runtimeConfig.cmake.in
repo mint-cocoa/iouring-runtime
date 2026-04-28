@@ -13,3 +13,15 @@ if(NOT TARGET iouring::Runtime AND TARGET @IORUNTIME_PACKAGE_NAME@::Runtime)
     set_property(TARGET iouring::Runtime PROPERTY
         INTERFACE_LINK_LIBRARIES @IORUNTIME_PACKAGE_NAME@::Runtime)
 endif()
+
+if(NOT TARGET iouring::RuntimeObservability AND TARGET @IORUNTIME_PACKAGE_NAME@::RuntimeObservability)
+    add_library(iouring::RuntimeObservability INTERFACE IMPORTED)
+    set_property(TARGET iouring::RuntimeObservability PROPERTY
+        INTERFACE_LINK_LIBRARIES @IORUNTIME_PACKAGE_NAME@::RuntimeObservability)
+endif()
+
+if(NOT TARGET iouring::RuntimeMedia AND TARGET @IORUNTIME_PACKAGE_NAME@::RuntimeMedia)
+    add_library(iouring::RuntimeMedia INTERFACE IMPORTED)
+    set_property(TARGET iouring::RuntimeMedia PROPERTY
+        INTERFACE_LINK_LIBRARIES @IORUNTIME_PACKAGE_NAME@::RuntimeMedia)
+endif()

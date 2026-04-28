@@ -1,142 +1,121 @@
 # Runtime Architecture
 
-This document describes the current architecture of the standalone
-`iouring-runtime` repository.
+This is a maintainer note for the current module layout. For user-facing
+examples, start with `docs/getting-started.md` and `docs/usage-examples.md`.
 
-## Scope
+## Module Boundaries
 
-The runtime owns:
+```text
+CMake target: module-level link boundary
+C++ include:  per-file public API selection
+```
+
+| Module | Target | Source | Public headers |
+| --- | --- | --- | --- |
+| Core runtime | `iouring_runtime::Runtime` | `src/runtime/` | `include/iouring_runtime/core/` |
+| Observability | `iouring_runtime::RuntimeObservability` | `src/modules/observability/` | `include/iouring_runtime/observability/` |
+| Media | `iouring_runtime::RuntimeMedia` | `src/modules/media/` | `include/iouring_runtime/media/` |
+| Web | `iouring_runtime_web::RuntimeWeb` | `src/modules/web/` | `include/iouring_runtime/web/` |
+| Proxy | `iouring_runtime_proxy::RuntimeProxy` | `src/modules/proxy/` | `include/iouring_runtime/proxy/` |
+| Game | `iouring_runtime_game::RuntimeGame` | `src/modules/game/` | `include/iouring_runtime/game/` |
+
+The core target is protocol-agnostic. Web, proxy, and game code build on top of
+core without moving protocol concepts into `include/iouring_runtime/core/`.
+
+## Core Responsibilities
+
+Core owns:
 
 - `io_uring` creation and dispatch
 - listener accept flow
 - session lifecycle and self-ownership
-- send/recv buffering
-- timeout and watchdog handling
-- queueing and backpressure
-- job queues and timers
-
-The core runtime target does not own:
-
-- HTTP
-- WebSocket
-- packet schemas
-- storage
-- application-domain logic
-
-HTTP, TCP proxy, multiplayer packet, and observability code now live as
-optional modules in the same repository. They build on the runtime core
-without changing the default runtime package boundary.
-
-## Source Layout
-
-- `include/iouring_runtime/core/`
-  public runtime API
-- `include/iouring_runtime/web/`
-  optional HTTP API
-- `include/iouring_runtime/proxy/`
-  optional TCP proxy API
-- `include/iouring_runtime/game/`
-  optional multiplayer packet, player registry, and room API
-- `include/iouring_runtime/observability/`
-  logging and profiling helpers
-- `src/runtime/ring/`
-  `io_uring` wrapper and buffer-ring support
-- `src/runtime/io/`
-  listener and session lifecycle implementation
-- `src/runtime/job/`
-  job queues and timers
-- `src/runtime/common/`
-  shared runtime utilities such as CPU affinity helpers
-- `src/modules/web/`
-  HTTP parser, response framing, router, sessions, streaming body handling,
-  deferred responses, file streaming, and worker server logic
-- `src/modules/proxy/`
-  TCP proxy server, upstream connector, bridge logic, TLS context, and ACME
-  challenge session support
-- `src/modules/game/`
-  packet framing, player/session registry, room dispatch, and room-management
-  helpers for binary multiplayer protocols
-- `src/modules/observability/`
-  logging implementation used by runtime and modules
-
-## Core Types
-
-The execution model centers on:
-
-- `iouring_runtime::core::ring::IoRing`
-- `iouring_runtime::core::io::Listener`
-- `iouring_runtime::core::io::Session`
-- `iouring_runtime::core::buffer::SendBuffer`
-- `iouring_runtime::core::buffer::RecvBuffer`
-- `iouring_runtime::core::buffer::SendQueue`
-- `iouring_runtime::core::job::GlobalQueue`
-- `iouring_runtime::core::job::JobQueue`
-- `iouring_runtime::core::job::JobTimer`
-
-## Accept Path
-
-- listeners are created with nonblocking sockets
-- accepted sockets are normalized before session construction
-- multishot accept is the primary path
-- `Listener::OnAccept()` constructs sessions through a `SessionFactory`
-
-This keeps protocol creation above the runtime while letting the runtime own
-the actual accept loop.
-
-## Session Model
-
-`Session` is the key runtime abstraction.
-
-It owns:
-
 - recv registration
-- send queue drain and short-write retry
-- disconnect and disconnect-after-flush behavior
-- inactivity watchdog timing
-- self-ownership while I/O is in flight
+- send queue draining and short-write retry
+- send/recv buffers
+- inactivity timeout hooks
+- job queues and timers
+- backpressure policy
 
-Subclasses provide only protocol-level behavior through:
+Core does not own:
 
-- `OnRecv(...)`
-- `OnConnected()`
-- `OnDisconnected()`
-- `OnTimeoutTick(...)`
-- `HasPendingAppWork()`
+- HTTP parsing or routing
+- WebSocket upgrade policy
+- packet schemas
+- TLS termination policy
+- storage drivers
+- application domain objects
 
-## Backpressure
+## Accept And Session Flow
 
-The runtime currently supports:
+The usual core flow is:
 
-- send-queue hard overflow limits
-- optional high/low watermark transitions
-- optional disconnect-on-high-watermark policy
+```text
+IoRing::Create
+BufferPool
+SessionFactory
+Listener::Start
+ring.Dispatch loop
+Session::OnRecv
+Session::Send
+Session::Disconnect or DisconnectAfterFlush
+```
 
-These policies are enforced in the runtime, not in any protocol layer.
+`Listener` accepts sockets and asks a `SessionFactory` to create a protocol
+session. The runtime owns the I/O lifecycle; the session subclass owns protocol
+behavior.
 
-## Shutdown
+## Optional Modules
 
-At the session level, shutdown semantics are:
+`RuntimeWeb` adds:
 
-- `Disconnect()` for immediate disconnect initiation
-- `DisconnectAfterFlush()` for close-after-queued-send behavior
-- self-ownership release only after in-flight I/O settles
+- HTTP parsing
+- route matching
+- middleware
+- request params, query params, cookies
+- response helpers
+- file and streaming responses
+- worker-thread server wrapper
 
-Repository-level process shutdown is left to the consuming application or
-example entrypoint.
+`RuntimeProxy` adds:
+
+- downstream TCP listener
+- upstream connector
+- bidirectional stream bridge
+- optional downstream TLS termination
+- optional ACME HTTP-01 responder
+- SNI-based upstream routes
+- metrics snapshots
+
+`RuntimeGame` adds:
+
+- packet framing
+- packet builder helpers
+- packet sessions
+- player registry
+- room and room manager helpers
 
 ## Validation
 
-The runtime is currently validated through:
+Tests are grouped by runtime area:
 
-- focused unit tests under `tests/`
-- example programs under `app/examples/runtime/`
-- sanitizer rebuilds via `scripts/run_runtime_sanitizers.sh`
+- `tests/core/`
+- `tests/io/`
+- `tests/ring/`
+- `tests/job/`
+- `tests/web/`
+- `tests/proxy/`
+- `tests/game/`
+- `tests/media/`
+- `tests/observability/`
 
-Optional module behavior is covered by:
+Run the full configured suite:
 
-- HTTP tests under `tests/web/`
-- proxy tests under `tests/proxy/`
-- observability tests under `tests/observability/`
-- web, proxy, and game examples under `app/examples/web/`, `app/examples/proxy/`,
-  and `app/examples/game/`; the full dungeon RPG gameplay port lives under
-  `app/examples/game/dungeon_full_server/`
+```bash
+ctest --test-dir build-tests --output-on-failure
+```
+
+Run sanitizer builds:
+
+```bash
+./scripts/run_runtime_sanitizers.sh
+```

@@ -88,6 +88,7 @@ add_library(RuntimeObservability STATIC
 )
 
 add_library(${IORUNTIME_OBSERVABILITY_PACKAGE_NAME}::RuntimeObservability ALIAS RuntimeObservability)
+add_library(${IORUNTIME_PACKAGE_NAME}::RuntimeObservability ALIAS RuntimeObservability)
 add_library(iouring::RuntimeObservability ALIAS RuntimeObservability)
 
 target_include_directories(RuntimeObservability
@@ -141,6 +142,7 @@ add_library(RuntimeMedia STATIC
 )
 
 add_library(${IORUNTIME_MEDIA_PACKAGE_NAME}::RuntimeMedia ALIAS RuntimeMedia)
+add_library(${IORUNTIME_PACKAGE_NAME}::RuntimeMedia ALIAS RuntimeMedia)
 add_library(iouring::RuntimeMedia ALIAS RuntimeMedia)
 
 target_include_directories(RuntimeMedia

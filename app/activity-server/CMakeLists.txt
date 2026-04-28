@@ -12,7 +12,7 @@ add_executable(activity_server
 
 target_link_libraries(activity_server PRIVATE
     iouring_runtime::Runtime
-    iouring_runtime_media::RuntimeMedia
+    iouring_runtime::RuntimeMedia
     OpenSSL::Crypto
 )
 

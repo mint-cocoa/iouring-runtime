@@ -1,98 +1,158 @@
 # Proxy Guide
 
-`iouring_runtime_proxy::RuntimeProxy` is an optional TCP reverse proxy module
-built on top of the core `io_uring` runtime.
+`iouring_runtime_proxy::RuntimeProxy` is an optional layer-4 TCP reverse proxy
+built on the core runtime.
 
-## Scope
+It can:
 
-- accepts downstream TCP connections
-- can terminate downstream TLS with OpenSSL
-- can serve ACME HTTP-01 challenge files from a webroot for `certbot`
-- opens an upstream TCP connection per downstream session
-- can choose an upstream by downstream TLS SNI when routes are configured
-- forwards bytes bidirectionally between downstream and upstream sockets
-- applies inactivity timeouts and send-queue backpressure to both sides
+- accept downstream TCP connections
+- open one upstream TCP connection per downstream session
+- forward bytes in both directions
+- apply inactivity timeouts and send-queue backpressure
+- terminate downstream TLS with OpenSSL
+- route TLS traffic by SNI
+- serve ACME HTTP-01 challenge files for `certbot`
+- write runtime metrics snapshots
 
-This module is a layer-4 stream proxy. It does not parse HTTP beyond the
-optional ACME HTTP-01 challenge responder. Host-based routing uses TLS SNI,
-so it requires downstream TLS termination and clients that send SNI.
+It does not parse HTTP traffic, except for the optional ACME challenge
+responder. Host routing uses TLS SNI.
 
-## Build
+## Build And Run
+
+Start an upstream:
 
 ```bash
-cmake -S . -B build-proxy -DCMAKE_BUILD_TYPE=Release -DBUILD_PROXY=ON
-cmake --build build-proxy -j$(nproc)
+python3 -m http.server 8080
 ```
 
-## Public Target
-
-- `iouring_runtime_proxy::RuntimeProxy`
-
-## Public Headers
-
-- `iouring_runtime/proxy/TcpProxyServer.h`
-
-## Example
-
-The repository includes `app/examples/proxy/tcp_reverse_proxy/`.
+Build the proxy example:
 
 ```bash
-TCP_PROXY_LISTEN_HOST=0.0.0.0 \
+cmake -S . -B build-proxy \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_PROXY=ON \
+  -DBUILD_EXAMPLES=ON \
+  -DBUILD_TESTS=OFF
+cmake --build build-proxy --target tcp_reverse_proxy -j$(nproc)
+```
+
+Run:
+
+```bash
+TCP_PROXY_LISTEN_HOST=127.0.0.1 \
 TCP_PROXY_LISTEN_PORT=18080 \
 TCP_PROXY_UPSTREAM_HOST=127.0.0.1 \
 TCP_PROXY_UPSTREAM_PORT=8080 \
-TCP_PROXY_UPSTREAM_ROUTES='app.example.com=127.0.0.1:3001,*.example.com=127.0.0.1:3002' \
-TCP_PROXY_TLS_CERT_FILE=/etc/letsencrypt/live/example.com/fullchain.pem \
-TCP_PROXY_TLS_KEY_FILE=/etc/letsencrypt/live/example.com/privkey.pem \
-TCP_PROXY_CERTBOT_CHALLENGE_PORT=80 \
-TCP_PROXY_CERTBOT_CHALLENGE_WEBROOT=/var/lib/letsencrypt \
 ./build-proxy/bin/tcp_reverse_proxy
 ```
 
-Deployment assets for the example live under
-`app/examples/proxy/tcp_reverse_proxy/deploy/`.
+Try it:
 
-## Configuration Highlights
+```bash
+curl http://127.0.0.1:18080/
+```
 
-- `listen_host` / `listen_port`: proxy bind address
-- `upstream_host` / `upstream_port`: per-connection upstream target
-- `upstream_routes`: optional SNI hostname routes. The example binary reads
-  these from `TCP_PROXY_UPSTREAM_ROUTES` as
-  `hostname=host:port,*.example.com=host:port`; first match wins and the
-  default upstream is used when no route matches.
-- `downstream_tls.certificate_chain_file`: PEM certificate chain for TLS termination
-- `downstream_tls.private_key_file`: PEM private key for TLS termination
-- `certbot.challenge_host`: bind address for HTTP-01 challenge responses
-- `certbot.challenge_port`: bind port for HTTP-01 challenge responses, usually `80`
-- `certbot.challenge_webroot`: directory passed to `certbot --webroot-path`
-- `timeouts.connect`: upstream connect deadline
-- `timeouts.inactivity`: idle deadline for both downstream and upstream
-- `pending_connect_buffer_limit`: bytes buffered while upstream connect is in flight
+## Use From CMake
 
-## Zero-Downtime TLS Reload
+```cmake
+find_package(iouring_runtime_proxy CONFIG REQUIRED)
 
-When downstream TLS is enabled, the proxy can swap in a new certificate context
-without dropping existing sessions. Existing TLS sessions keep using the old
-OpenSSL context they were created with, while new sessions use the reloaded
-certificate.
+add_executable(my_proxy src/main.cpp)
+target_link_libraries(my_proxy PRIVATE
+    iouring_runtime_proxy::RuntimeProxy
+)
+target_compile_features(my_proxy PRIVATE cxx_std_23)
+```
 
-The example binary listens for `SIGHUP` and calls
-`ReloadDownstreamTlsContext()` when it receives the signal.
+```cpp
+#include <iouring_runtime/proxy/TcpProxyServer.h>
+```
 
-If you run it under `systemd`, the provided unit maps `systemctl reload` to
-that same `SIGHUP`.
+Minimal server:
 
-## Production Layout
+```cpp
+int main() {
+    iouring_runtime::proxy::TcpProxyConfig config;
+    config.listen_host = "0.0.0.0";
+    config.listen_port = 18080;
+    config.upstream_host = "127.0.0.1";
+    config.upstream_port = 8080;
+    config.worker_count = 1;
 
-One straightforward layout for a single-domain deployment is:
+    iouring_runtime::proxy::TcpProxyServer server(config);
+    iouring_runtime::proxy::TcpProxyServer::InstallStopSignalHandlers();
 
-- proxy binary: `/usr/local/bin/tcp_reverse_proxy`
-- systemd unit: `/etc/systemd/system/tcp_reverse_proxy.service`
-- environment file: `/etc/iouring-runtime/tcp_reverse_proxy.env`
-- ACME webroot: `/var/lib/letsencrypt`
-- live certificate files: `/etc/letsencrypt/live/<domain>/`
+    server.Start();
+    iouring_runtime::proxy::TcpProxyServer::WaitForStopSignal(
+        std::chrono::milliseconds{100});
+    server.Stop();
+}
+```
 
-Install the example binary and deployment files:
+## Example Environment
+
+The example binary reads configuration from environment variables:
+
+```bash
+TCP_PROXY_LISTEN_HOST=0.0.0.0
+TCP_PROXY_LISTEN_PORT=18080
+TCP_PROXY_UPSTREAM_HOST=127.0.0.1
+TCP_PROXY_UPSTREAM_PORT=8080
+TCP_PROXY_WORKERS=4
+TCP_PROXY_LOG_LEVEL=info
+```
+
+SNI routes:
+
+```bash
+TCP_PROXY_UPSTREAM_ROUTES='app.example.com=127.0.0.1:3001,*.example.com=127.0.0.1:3002'
+```
+
+TLS termination:
+
+```bash
+TCP_PROXY_TLS_CERT_FILE=/etc/letsencrypt/live/example.com/fullchain.pem
+TCP_PROXY_TLS_KEY_FILE=/etc/letsencrypt/live/example.com/privkey.pem
+```
+
+ACME HTTP-01 responder:
+
+```bash
+TCP_PROXY_CERTBOT_CHALLENGE_HOST=0.0.0.0
+TCP_PROXY_CERTBOT_CHALLENGE_PORT=80
+TCP_PROXY_CERTBOT_CHALLENGE_WEBROOT=/var/lib/letsencrypt
+```
+
+Metrics snapshot:
+
+```bash
+TCP_PROXY_METRICS_FILE=/run/iouring-runtime/tcp_reverse_proxy.metrics.json
+TCP_PROXY_METRICS_INTERVAL_MS=1000
+```
+
+## TLS Reload
+
+When TLS is enabled, `TcpProxyServer::ReloadDownstreamTlsContext()` swaps in a
+new OpenSSL context for new sessions. Existing TLS sessions keep their old
+context.
+
+The example binary maps `SIGHUP` to reload:
+
+```bash
+kill -HUP <proxy-pid>
+```
+
+Under systemd, the provided unit maps `systemctl reload` to the same signal.
+
+## Systemd Deployment
+
+Deployment assets live in:
+
+```text
+app/examples/proxy/tcp_reverse_proxy/deploy/
+```
+
+Install the binary and service files:
 
 ```bash
 sudo install -D -m 0755 build-proxy/bin/tcp_reverse_proxy /usr/local/bin/tcp_reverse_proxy
@@ -100,185 +160,68 @@ sudo install -D -m 0644 app/examples/proxy/tcp_reverse_proxy/deploy/tcp_reverse_
   /etc/systemd/system/tcp_reverse_proxy.service
 sudo install -D -m 0644 app/examples/proxy/tcp_reverse_proxy/deploy/tcp_reverse_proxy.env.example \
   /etc/iouring-runtime/tcp_reverse_proxy.env
-sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-issue.sh \
-  /usr/local/libexec/iouring-runtime/certbot-issue.sh
-sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
-  /usr/local/libexec/iouring-runtime/certbot-renew-hook.sh
 ```
 
-The provided unit runs as `tcp-proxy` and grants only
-`CAP_NET_BIND_SERVICE`, so create that account before enabling the service:
+Create runtime directories and account:
 
 ```bash
 sudo useradd --system --home /var/lib/iouring-runtime --shell /usr/sbin/nologin tcp-proxy
-sudo install -d -o root -g root -m 0755 /var/lib/letsencrypt
 sudo install -d -o root -g root -m 0755 /etc/iouring-runtime
+sudo install -d -o root -g root -m 0755 /var/lib/letsencrypt
 ```
 
-Then edit `/etc/iouring-runtime/tcp_reverse_proxy.env` for your domain,
-upstream port, and certificate paths. For the very first issuance, leave
-`TCP_PROXY_TLS_CERT_FILE` and `TCP_PROXY_TLS_KEY_FILE` empty so the service can
-start before the certificate exists. Until those paths are filled and the
-service is restarted, the main listener is not terminating TLS yet.
+Edit:
 
-## Certbot
+```text
+/etc/iouring-runtime/tcp_reverse_proxy.env
+```
 
-For Let's Encrypt and `certbot`, point the proxy at the live certificate files:
-
-- `/etc/letsencrypt/live/<domain>/fullchain.pem`
-- `/etc/letsencrypt/live/<domain>/privkey.pem`
-
-To let this proxy answer HTTP-01 challenges directly, configure:
-
-- `TCP_PROXY_CERTBOT_CHALLENGE_HOST=0.0.0.0`
-- `TCP_PROXY_CERTBOT_CHALLENGE_PORT=80`
-- `TCP_PROXY_CERTBOT_CHALLENGE_WEBROOT=/var/lib/letsencrypt`
-
-Start and enable the service before issuing the first certificate so port `80`
-is already serving `/.well-known/acme-challenge/*`:
+Start:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now tcp_reverse_proxy.service
 ```
 
-Issue the first certificate with the provided helper:
+## Certbot Flow
+
+Install helper scripts:
 
 ```bash
-sudo /usr/local/libexec/iouring-runtime/certbot-issue.sh /etc/iouring-runtime/tcp_reverse_proxy.env
+sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-issue.sh \
+  /usr/local/libexec/iouring-runtime/certbot-issue.sh
+sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
+  /etc/letsencrypt/renewal-hooks/deploy/tcp_reverse_proxy-reload.sh
 ```
 
-After the first certificate is issued, set these two values in
-`/etc/iouring-runtime/tcp_reverse_proxy.env`:
+First issuance:
 
-- `TCP_PROXY_TLS_CERT_FILE=/etc/letsencrypt/live/<domain>/fullchain.pem`
-- `TCP_PROXY_TLS_KEY_FILE=/etc/letsencrypt/live/<domain>/privkey.pem`
+```bash
+sudo /usr/local/libexec/iouring-runtime/certbot-issue.sh \
+  /etc/iouring-runtime/tcp_reverse_proxy.env
+```
 
-Then restart once to turn on downstream TLS:
+After certificates exist, set:
+
+```text
+TCP_PROXY_TLS_CERT_FILE=/etc/letsencrypt/live/<domain>/fullchain.pem
+TCP_PROXY_TLS_KEY_FILE=/etc/letsencrypt/live/<domain>/privkey.pem
+```
+
+Then restart once:
 
 ```bash
 sudo systemctl restart tcp_reverse_proxy.service
 ```
 
-Hook renewals into `systemctl reload`:
+Future renewals reload the service through the deploy hook.
 
-```bash
-sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
-  /etc/letsencrypt/renewal-hooks/deploy/tcp_reverse_proxy-reload.sh
-```
+## Related Examples
 
-After each renewal, `certbot` runs that deploy hook, which calls
-`systemctl reload tcp_reverse_proxy.service`. That sends `SIGHUP`, reloads
-the OpenSSL context, and keeps existing TLS sessions alive while new
-connections start using the renewed certificate.
+These web examples are useful proxy upstreams:
 
-## Status Server Upstream
-
-The optional `status_server` example uses the web module to expose a small
-runtime dashboard on localhost. Build with `BUILD_WEB=ON`, install the binary
-and unit, then add a proxy route for the subdomain:
-
-```bash
-sudo install -D -m 0755 build-proxy/bin/status_server /usr/local/bin/status_server
-sudo install -D -m 0644 app/examples/web/status_server/deploy/status_server.service \
-  /etc/systemd/system/status_server.service
-sudo install -D -m 0644 app/examples/web/status_server/deploy/status_server.env.example \
-  /etc/iouring-runtime/status_server.env
-sudo systemctl daemon-reload
-sudo systemctl enable --now status_server.service
-```
-
-Append the route to `TCP_PROXY_UPSTREAM_ROUTES`:
-
-```text
-status.mintcocoa.cc=127.0.0.1:3010
-```
-
-Then restart or reload the proxy so the new route is picked up.
-
-The status server also reads the proxy runtime metrics snapshot when both
-services use the default metrics path:
-
-```text
-TCP_PROXY_METRICS_FILE=/run/iouring-runtime/tcp_reverse_proxy.metrics.json
-STATUS_PROXY_METRICS_FILE=/run/iouring-runtime/tcp_reverse_proxy.metrics.json
-```
-
-## Kubernetes Demo Upstream
-
-The repository includes GitOps manifests for a small `traefik/whoami` demo at
-`deploy/k8s/home/demo-whoami/`. The intended home-lab path is:
-
-```text
-tcp_reverse_proxy -> 192.168.0.240:80 -> ingress-nginx -> whoami Service
-```
-
-Append the route to `TCP_PROXY_UPSTREAM_ROUTES`:
-
-```text
-demo.mintcocoa.cc=192.168.0.240:80
-```
-
-Apply the Argo CD application manifest from
-`deploy/k8s/home/argocd/demo-whoami-application.yaml`, then let Argo CD sync the
-demo manifests. MetalLB should reserve `192.168.0.240` for the ingress-nginx
-LoadBalancer service.
-
-## OpenSpeedTest Upstream
-
-The optional `speedtest_server` example serves the OpenSpeedTest UI and handles
-the upload/download endpoints with the C++ web module. It avoids keeping upload
-bodies in memory by configuring the parser to discard `/upload` request bodies.
-
-Install the binary, bundled static files, and unit:
-
-```bash
-sudo install -D -m 0755 build-proxy/bin/speedtest_server /usr/local/bin/speedtest_server
-sudo install -d -m 0755 /usr/local/share/iouring-runtime/openspeedtest
-sudo cp -R app/examples/web/speedtest_server/public/. \
-  /usr/local/share/iouring-runtime/openspeedtest/
-sudo install -D -m 0644 app/examples/web/speedtest_server/deploy/speedtest_server.service \
-  /etc/systemd/system/speedtest_server.service
-sudo install -D -m 0644 app/examples/web/speedtest_server/deploy/speedtest_server.env.example \
-  /etc/iouring-runtime/speedtest_server.env
-sudo systemctl daemon-reload
-sudo systemctl enable --now speedtest_server.service
-```
-
-Route the existing speed subdomain to it:
-
-```text
-speed.mintcocoa.cc=127.0.0.1:3004
-```
-
-If another OpenSpeedTest container is already bound to port `3004`, stop that
-container before starting `speedtest_server`, or change `SPEEDTEST_PORT` and the
-matching proxy route together.
-
-## File Store Upstream
-
-The optional `file_store_server` example provides a small browser file store.
-Uploads use streaming request-body handlers, so large request bodies are written
-to `.part` files as chunks arrive instead of being buffered in memory.
-
-Install the binary, environment file, and unit:
-
-```bash
-sudo install -D -m 0755 build-proxy/bin/file_store_server /usr/local/bin/file_store_server
-sudo install -d -o tcp-proxy -g tcp-proxy -m 0755 /var/lib/iouring-runtime/files
-sudo install -D -m 0644 app/examples/web/file_store_server/deploy/file_store_server.service \
-  /etc/systemd/system/file_store_server.service
-sudo install -D -m 0644 app/examples/web/file_store_server/deploy/file_store_server.env.example \
-  /etc/iouring-runtime/file_store_server.env
-sudo systemctl daemon-reload
-sudo systemctl enable --now file_store_server.service
-```
-
-Append the route to `TCP_PROXY_UPSTREAM_ROUTES`:
-
-```text
-files.mintcocoa.cc=127.0.0.1:3012
-```
-
-Set `FILE_STORE_AUTH_TOKEN` in `/etc/iouring-runtime/file_store_server.env` if
-uploads and deletes should require a bearer token.
+- `app/examples/web/status_server/`
+- `app/examples/web/speedtest_server/`
+- `app/examples/web/file_store_server/`
+- `app/examples/web/dropapp/`
+- `app/examples/web/webhook_inbox/`

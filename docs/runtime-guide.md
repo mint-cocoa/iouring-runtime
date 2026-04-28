@@ -1,120 +1,161 @@
-# Runtime Guide
+# Core Runtime Guide
 
-This guide is for consumers who want to start from the runtime target directly
-and use the repository as an `io_uring` runtime rather than as a higher-level
-server framework.
+Use `iouring_runtime::Runtime` when you want a custom TCP protocol instead of
+HTTP, proxying, or the game packet helpers.
 
-## What Runtime Means Here
-
-In this repository, `Runtime` means the lower-level execution substrate:
-
-- `io_uring` creation and dispatch
-- listener accept flow
-- session lifetime and self-ownership
-- send/recv buffering
-- timeout and watchdog behavior
-- backpressure and drain semantics
-
-Today that layer is exposed as:
-
-- `iouring_runtime::Runtime`
-
-and the public headers under:
-
-- `iouring_runtime/core/...`
-
-## When To Start With The Runtime
-
-Start with `iouring-runtime` when you are building:
-
-- a custom binary protocol server
-- a small TCP service that does not need HTTP routing
-- a transport/runtime experiment around `io_uring`
-- a lower-level service where lifecycle control matters more than web helpers
-
-If you need HTTP, use the optional `RuntimeWeb` module. WebSocket, storage,
-packet schemas, and application-specific logic should live in layers above the
-runtime core.
-
-## Public Runtime Surface
-
-The core public types are:
-
-- `iouring_runtime::core::ring::IoRing`
-- `iouring_runtime::core::io::Listener`
-- `iouring_runtime::core::io::Session`
-- `iouring_runtime::core::buffer::SendBuffer`
-- `iouring_runtime::core::buffer::RecvBuffer`
-- `iouring_runtime::core::buffer::SendQueue`
-
-This surface is intentionally small. It is meant to be a set of reusable
-building blocks rather than a high-level framework.
-
-## Runtime Examples
-
-Current runtime-facing examples:
-
-- `app/examples/runtime/core_echo/`
-  minimal runtime echo server
-- `app/examples/runtime/core_idle_echo/`
-  echo server with inactivity watchdog and graceful close-after-flush behavior
-
-Build them with:
+## Build The Example
 
 ```bash
-cmake -S . -B build-runtime \
+cmake -S . -B build-core \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_EXAMPLES=ON \
   -DBUILD_TESTS=OFF
-cmake --build build-runtime --target core_echo core_idle_echo -j$(nproc)
+cmake --build build-core --target core_echo core_idle_echo -j$(nproc)
 ```
 
-Run them with:
+Run:
 
 ```bash
-CORE_ECHO_PORT=19090 ./build-runtime/bin/core_echo
-CORE_IDLE_ECHO_PORT=19091 CORE_IDLE_TIMEOUT_MS=5000 ./build-runtime/bin/core_idle_echo
+CORE_ECHO_PORT=19090 ./build-core/bin/core_echo
 ```
 
-## Minimal Runtime Shape
+Try it:
 
-The runtime usage pattern is:
+```bash
+printf 'hello\n' | nc 127.0.0.1 19090
+```
 
-1. create an `IoRing`
-2. create a `BufferPool`
-3. define a `Session` subclass
-4. provide a `SessionFactory`
-5. construct a `Listener`
-6. drive `Dispatch()` in a loop
+## Link The Runtime
 
-That shape is visible in both runtime examples and is the key distinction
-between this repository and a higher-level server framework.
+```cmake
+find_package(iouring_runtime CONFIG REQUIRED)
 
-## Runtime Design Rules
+add_executable(my_tcp_server src/main.cpp)
+target_link_libraries(my_tcp_server PRIVATE
+    iouring_runtime::Runtime
+)
+target_compile_features(my_tcp_server PRIVATE cxx_std_23)
+```
 
-The runtime should stay:
+## Include What You Use
 
-- protocol-agnostic
-- lifecycle-focused
-- small in public API surface
-- strong on shutdown and backpressure behavior
+```cpp
+#include <iouring_runtime/core/IoRing.h>
+#include <iouring_runtime/core/Listener.h>
+#include <iouring_runtime/core/SendBuffer.h>
+#include <iouring_runtime/core/Session.h>
+#include <iouring_runtime/core/Types.h>
+```
 
-That means `Runtime` should not absorb:
+## Define A Session
 
-- HTTP request/response types
-- routers or middleware
-- WebSocket upgrade logic
-- static file policy
-- auth helpers
-- application-domain concepts
+A `Session` owns socket I/O, recv registration, send queue draining, timeout
+hooks, and disconnect state. Your subclass implements protocol behavior.
 
-The repository may still contain optional modules that use the runtime. Those
-modules should remain separate targets with their public headers outside
-`iouring_runtime/core/...`.
+```cpp
+class EchoSession final : public iouring_runtime::core::io::Session {
+public:
+    using Session::Session;
 
-## Related Docs
+private:
+    void OnRecv(std::span<const std::byte> data) override {
+        auto result = Pool().Allocate(static_cast<std::uint32_t>(data.size()));
+        if (!result) {
+            Disconnect();
+            return;
+        }
 
-- Getting started: `docs/getting-started.md`
-- API reference: `docs/api-reference.md`
-- Runtime architecture: `docs/runtime-architecture.md`
-- Runtime plan: `docs/plans/2026-04-22-io-uring-runtime-plan.md`
+        auto buffer = std::move(*result);
+        std::memcpy(buffer->Writable().data(), data.data(), data.size());
+        buffer->Commit(static_cast<std::uint32_t>(data.size()));
+
+        if (!Send(std::move(buffer)).has_value()) {
+            Disconnect();
+        }
+    }
+
+    void OnConnected() override {
+        std::cout << "client connected: " << RemoteAddr() << "\n";
+    }
+
+    void OnDisconnected() override {
+        std::cout << "client disconnected\n";
+    }
+};
+```
+
+## Create A Listener
+
+`Listener` accepts sockets and creates sessions through a factory.
+
+```cpp
+iouring_runtime::core::io::SessionFactory factory =
+    [](int fd,
+       iouring_runtime::core::ring::IoRing& ring,
+       iouring_runtime::core::buffer::BufferPool& pool,
+       iouring_runtime::core::ContextId)
+        -> iouring_runtime::core::io::SessionRef {
+    return std::make_shared<EchoSession>(fd, ring, pool);
+};
+
+iouring_runtime::core::Address address{
+    .host = "0.0.0.0",
+    .port = 19090,
+};
+
+auto listener = std::make_shared<iouring_runtime::core::io::Listener>(
+    *ring, pool, address, std::move(factory), 0);
+
+auto started = listener->Start();
+if (!started) {
+    return 1;
+}
+```
+
+## Drive The Ring
+
+The core runtime is explicit: your process owns the event loop.
+
+```cpp
+while (!stop_requested.load(std::memory_order_relaxed)) {
+    ring->Dispatch(std::chrono::milliseconds{10});
+    ring->ProcessPostedTasks();
+}
+
+listener->Stop();
+```
+
+If you use `GlobalQueue`, drain posted jobs inside the loop:
+
+```cpp
+while (auto* queue = global_queue.TryPop()) {
+    queue->Execute();
+}
+```
+
+## Add Idle Timeouts
+
+Use `core_idle_echo` as the reference for inactivity handling:
+
+```bash
+CORE_IDLE_ECHO_PORT=19091 \
+CORE_IDLE_TIMEOUT_MS=5000 \
+./build-core/bin/core_idle_echo
+```
+
+Useful hooks:
+
+- `OnTimeoutTick(...)`
+- `HasPendingAppWork()`
+- `DisconnectAfterFlush()`
+
+## When To Use A Higher Module
+
+Use core directly for binary protocols, experiments, and custom transport
+behavior. Use a higher module when the protocol layer already matches the app:
+
+- HTTP app: `iouring_runtime_web::RuntimeWeb`
+- TCP reverse proxy: `iouring_runtime_proxy::RuntimeProxy`
+- packet game server: `iouring_runtime_game::RuntimeGame`
+
+See `docs/usage-examples.md` for those snippets.
