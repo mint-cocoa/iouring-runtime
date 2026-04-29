@@ -1,5 +1,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
+const HEARTBEAT_INTERVAL_MS = 15000
+
 const getClientId = () => {
     try {
         return crypto.randomUUID()
@@ -32,6 +34,7 @@ export function useCocoaSocket(instanceId = null, onToast = null) {
     const clientId = ref(getClientId())
     const seqRef = ref(0)
     const reconnectTimerRef = ref(null)
+    const heartbeatTimerRef = ref(null)
     const reconnectAttempts = ref(0)
     const manuallyClosed = ref(false)
 
@@ -55,6 +58,20 @@ export function useCocoaSocket(instanceId = null, onToast = null) {
             clearTimeout(reconnectTimerRef.value)
             reconnectTimerRef.value = null
         }
+    }
+
+    const stopHeartbeat = () => {
+        if (heartbeatTimerRef.value) {
+            clearInterval(heartbeatTimerRef.value)
+            heartbeatTimerRef.value = null
+        }
+    }
+
+    const startHeartbeat = () => {
+        stopHeartbeat()
+        heartbeatTimerRef.value = setInterval(() => {
+            sendEvent('PING', { ts: Date.now() })
+        }, HEARTBEAT_INTERVAL_MS)
     }
 
     const scheduleReconnect = () => {
@@ -86,6 +103,7 @@ export function useCocoaSocket(instanceId = null, onToast = null) {
             console.log('Connected to WebSocket')
             reconnectAttempts.value = 0
             connected.value = true
+            startHeartbeat()
             try {
                 socket.send(JSON.stringify({
                     type: 'HELLO',
@@ -105,6 +123,7 @@ export function useCocoaSocket(instanceId = null, onToast = null) {
             connected.value = false
             clients.value = []
             clientCount.value = 0
+            stopHeartbeat()
             wsRef.value = null
             scheduleReconnect()
         }
@@ -170,6 +189,9 @@ export function useCocoaSocket(instanceId = null, onToast = null) {
                         if (onToast) onToast(`Download failed: ${data.error}`, 'error')
                         break
 
+                    case 'PONG':
+                        break
+
                     default:
                         break
                 }
@@ -203,6 +225,7 @@ export function useCocoaSocket(instanceId = null, onToast = null) {
     onUnmounted(() => {
         manuallyClosed.value = true
         clearReconnectTimer()
+        stopHeartbeat()
         if (wsRef.value) wsRef.value.close()
     })
 

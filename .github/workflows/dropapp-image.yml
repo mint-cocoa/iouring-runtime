@@ -41,11 +41,19 @@ jobs:
       - name: Update dropapp image tag
         working-directory: gitops
         run: |
+          path="apps/dropapp/values.yaml"
+          if [ ! -f "$path" ]; then
+            echo "GITOPS_VALUES_PATH=" >> "$GITHUB_ENV"
+            echo "::notice::Skipping GitOps update because $path does not exist"
+            exit 0
+          fi
+          export GITOPS_VALUES_PATH="$path"
+          echo "GITOPS_VALUES_PATH=$path" >> "$GITHUB_ENV"
           python3 - <<'PY'
           from pathlib import Path
           import os
 
-          path = Path("apps/dropapp/values.yaml")
+          path = Path(os.environ["GITOPS_VALUES_PATH"])
           text = path.read_text()
           lines = []
           in_image = False
@@ -69,10 +77,11 @@ jobs:
           PY
 
       - name: Commit GitOps update
+        if: env.GITOPS_VALUES_PATH != ''
         working-directory: gitops
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/dropapp/values.yaml
+          git add "$GITOPS_VALUES_PATH"
           git commit -m "deploy dropapp ${GITHUB_SHA}" || exit 0
           git push

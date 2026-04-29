@@ -382,6 +382,11 @@ void ActivitySession::HandleWsText(std::string_view text) {
         return;
     }
 
+    if (type == "PING") {
+        SendTextAsync("{\"type\":\"PONG\"}");
+        return;
+    }
+
     if (type == "REQUEST_SYNC") {
         ApplySync(text, client_id);
     }
