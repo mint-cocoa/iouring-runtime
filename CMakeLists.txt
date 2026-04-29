@@ -112,6 +112,8 @@ add_library(Runtime STATIC
     src/runtime/io/Session.cpp
     src/runtime/io/SessionSend.cpp
     src/runtime/io/Listener.cpp
+    src/runtime/io/Worker.cpp
+    src/runtime/io/WorkerPool.cpp
     src/runtime/job/GlobalQueue.cpp
     src/runtime/job/JobQueue.cpp
     src/runtime/job/JobTimer.cpp
@@ -196,6 +198,7 @@ if(BUILD_PROXY)
 
     add_library(RuntimeProxy STATIC
         src/modules/proxy/AcmeChallengeSession.cpp
+        src/modules/proxy/AcmeHttpChallengeServer.cpp
         src/modules/proxy/DownstreamTlsContext.cpp
         src/modules/proxy/ProxyBridge.cpp
         src/modules/proxy/ProxyCommon.cpp

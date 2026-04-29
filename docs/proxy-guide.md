@@ -11,11 +11,12 @@ It can:
 - apply inactivity timeouts and send-queue backpressure
 - terminate downstream TLS with OpenSSL
 - route TLS traffic by SNI
-- serve ACME HTTP-01 challenge files for `certbot`
+- run a separate ACME HTTP-01 challenge listener for `certbot`
 - write runtime metrics snapshots
 
-It does not parse HTTP traffic, except for the optional ACME challenge
-responder. Host routing uses TLS SNI.
+The stream proxy path does not parse HTTP traffic. Host routing uses TLS SNI.
+The example binary can also compose a separate ACME HTTP-01 server, similar to
+keeping Nginx `stream` and `http` responsibilities in different blocks.
 
 ## Build And Run
 
@@ -122,6 +123,9 @@ TCP_PROXY_CERTBOT_CHALLENGE_HOST=0.0.0.0
 TCP_PROXY_CERTBOT_CHALLENGE_PORT=80
 TCP_PROXY_CERTBOT_CHALLENGE_WEBROOT=/var/lib/letsencrypt
 ```
+
+The ACME responder is implemented by `AcmeHttpChallengeServer`; the example
+starts it next to `TcpProxyServer` when the challenge port and webroot are set.
 
 Metrics snapshot:
 

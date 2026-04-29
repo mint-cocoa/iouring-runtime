@@ -10,7 +10,6 @@
 
 #include <cstdio>
 #include <thread>
-#include <vector>
 
 namespace obs = iouring_runtime::observability;
 namespace {
@@ -21,41 +20,13 @@ namespace iouring_runtime::web {
 
 void WebServer::StopAccepting() {
     for (auto& worker : workers_) {
-        worker->ring->Post([listener = worker->listener] {
-            if (listener) {
-                listener->Stop();
-            }
-        });
+        worker->io_worker->StopAccepting();
     }
 }
 
 void WebServer::DrainSessions(bool force_close) {
     for (auto& worker : workers_) {
-        std::vector<core::io::SessionRef> sessions;
-        {
-            std::lock_guard lock(worker->sessions_mu);
-            sessions.reserve(worker->sessions.size());
-            for (const auto& [_, session] : worker->sessions) {
-                sessions.push_back(session);
-            }
-        }
-
-        if (sessions.empty()) {
-            continue;
-        }
-
-        worker->ring->Post([sessions = std::move(sessions), force_close]() mutable {
-            for (auto& session : sessions) {
-                if (!session || session->Disconnecting()) {
-                    continue;
-                }
-                if (force_close) {
-                    session->Disconnect();
-                } else {
-                    session->DisconnectAfterFlush();
-                }
-            }
-        });
+        worker->io_worker->DrainSessions(force_close);
     }
 }
 
@@ -64,7 +35,7 @@ bool WebServer::WaitForZeroSessions(std::chrono::milliseconds timeout) {
     for (;;) {
         bool all_zero = true;
         for (const auto& worker : workers_) {
-            if (worker->live_sessions.load(std::memory_order_relaxed) != 0) {
+            if (worker->io_worker->LiveSessions() != 0) {
                 all_zero = false;
                 break;
             }
@@ -109,23 +80,13 @@ void WebServer::ConfigureWorkerAffinity(Worker& worker) {
                  worker.index, worker.pinned_cpu);
 }
 
-void WebServer::WorkerLoop(Worker& worker) {
+void WebServer::ConfigureWorkerThread(Worker& worker) {
     char tracy_thread_name[32] = {};
     std::snprintf(tracy_thread_name, sizeof(tracy_thread_name),
                   "web-worker-%u", static_cast<unsigned>(worker.index));
     TracyCSetThreadName(tracy_thread_name);
 
     ConfigureWorkerAffinity(worker);
-    core::ring::IoRing::SetCurrent(worker.ring.get());
-    while (running_.load(std::memory_order_relaxed)) {
-        worker.ring->Dispatch(config_.ring.io_timeout);
-        worker.ring->ProcessPostedTasks();
-    }
-
-    worker.ring->ProcessPostedTasks();
-    for (int i = 0; i < 8; ++i) {
-        worker.ring->Dispatch(std::chrono::milliseconds{0});
-    }
 }
 
 } // namespace iouring_runtime::web

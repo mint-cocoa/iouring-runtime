@@ -6,10 +6,15 @@
 #include <iouring_runtime/observability/Logging.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 
 namespace obs = iouring_runtime::observability;
 namespace {
 constexpr auto kLogCategory = obs::LogCategory::kRing;
+constexpr std::uint64_t kWakeUserData = 0x2ULL;
 }
 
 namespace iouring_runtime::core::ring {
@@ -90,10 +95,21 @@ IoRing::IoRing(io_uring* ring, std::unique_ptr<RingBuffer> br,
     : ring_(ring)
     , buf_ring_(std::move(br))
     , submit_batch_size_(submit_batch_size)
-    , cqe_batch_budget_(cqe_batch_budget) {}
+    , cqe_batch_budget_(cqe_batch_budget) {
+    wake_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (wake_fd_ < 0) {
+        obs::LogWarn(kLogCategory, "IoRing: eventfd wakeup disabled");
+        return;
+    }
+    ArmWakePoll();
+}
 
 IoRing::~IoRing() {
     buf_ring_.reset();
+    if (wake_fd_ >= 0) {
+        ::close(wake_fd_);
+        wake_fd_ = -1;
+    }
     Deleter{}(ring_);
 }
 
@@ -106,6 +122,9 @@ int IoRing::Fd() const noexcept {
 bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
     ZoneScopedN("IoRing::Dispatch");
     FlushSubmissions();
+    if (!wake_poll_armed_) {
+        ArmWakePoll();
+    }
     io_uring_cqe* cqe = nullptr;
 
     __kernel_timespec ts{};
@@ -143,6 +162,11 @@ bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
                 auto* task = reinterpret_cast<std::move_only_function<void()>*>(data & ~0x1ULL);
                 (*task)();
                 delete task;
+            } else if (data == kWakeUserData) {
+                wake_poll_armed_ = false;
+                if (result >= 0) {
+                    DrainWakeFd();
+                }
             } else if (data != 0) {
                 auto* ev = reinterpret_cast<IoEvent*>(data);
                 auto owner = ev->Owner();
@@ -158,6 +182,10 @@ bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
             }
         }
         io_uring_cq_advance(ring_, count);
+    }
+
+    if (!wake_poll_armed_) {
+        ArmWakePoll();
     }
 
     return true;
@@ -184,6 +212,50 @@ int IoRing::FlushSubmissions() {
     ZoneScopedN("IoRing::FlushSubmissions");
     pending_submissions_ = 0;
     return io_uring_submit(ring_);
+}
+
+void IoRing::ArmWakePoll() {
+    if (!ring_ || wake_fd_ < 0 || wake_poll_armed_) {
+        return;
+    }
+
+    io_uring_sqe* sqe = io_uring_get_sqe(ring_);
+    if (!sqe) {
+        obs::LogWarn(kLogCategory, "IoRing::ArmWakePoll: SQE ring full");
+        return;
+    }
+
+    io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
+    io_uring_sqe_set_data64(sqe, kWakeUserData);
+    if (io_uring_submit(ring_) < 0) {
+        obs::LogWarn(kLogCategory, "IoRing::ArmWakePoll: submit failed");
+        return;
+    }
+    wake_poll_armed_ = true;
+}
+
+void IoRing::DrainWakeFd() noexcept {
+    if (wake_fd_ < 0) {
+        return;
+    }
+
+    eventfd_t value = 0;
+    while (::eventfd_read(wake_fd_, &value) == 0) {}
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        obs::LogWarn(kLogCategory, "IoRing::DrainWakeFd: read failed");
+    }
+}
+
+void IoRing::Wake() noexcept {
+    if (wake_fd_ < 0) {
+        return;
+    }
+
+    if (::eventfd_write(wake_fd_, 1) != 0 &&
+        errno != EAGAIN &&
+        errno != EWOULDBLOCK) {
+        obs::LogWarn(kLogCategory, "IoRing::Wake: write failed");
+    }
 }
 
 bool IoRing::PrepRecv(RecvEvent& ev, int fd) {
@@ -381,9 +453,14 @@ bool IoRing::RunOnRing(std::move_only_function<void()> task) noexcept {
 }
 
 void IoRing::Post(std::move_only_function<void()> task) {
-    std::lock_guard lk(post_mutex_);
-    LockMark(post_mutex_);
-    posted_.push_back(std::move(task));
+    {
+        std::lock_guard lk(post_mutex_);
+        LockMark(post_mutex_);
+        posted_.push_back(std::move(task));
+    }
+    if (t_current_ != this) {
+        Wake();
+    }
 }
 
 void IoRing::ProcessPostedTasks() {

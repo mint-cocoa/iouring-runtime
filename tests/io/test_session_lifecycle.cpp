@@ -148,6 +148,36 @@ TEST_F(SessionLifecycleTest, NormalDisconnect) {
     EXPECT_EQ(sess.use_count(), 1);
 }
 
+TEST_F(SessionLifecycleTest, AppendedLifecycleCallbacksPreserveExistingCallbacks) {
+    auto [local_fd, remote_fd] = MakeSocketPair();
+
+    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
+    std::atomic<int> connected_callbacks{0};
+    std::atomic<int> disconnected_callbacks{0};
+
+    sess->SetConnectedCallback([&](SessionRef) {
+        connected_callbacks.fetch_add(1, std::memory_order_relaxed);
+    });
+    sess->AddConnectedCallback([&](SessionRef) {
+        connected_callbacks.fetch_add(1, std::memory_order_relaxed);
+    });
+    sess->SetDisconnectCallback([&](SessionRef) {
+        disconnected_callbacks.fetch_add(1, std::memory_order_relaxed);
+    });
+    sess->AddDisconnectCallback([&](SessionRef) {
+        disconnected_callbacks.fetch_add(1, std::memory_order_relaxed);
+    });
+
+    sess->Start();
+    EXPECT_EQ(connected_callbacks.load(std::memory_order_relaxed), 2);
+
+    ::close(remote_fd);
+    DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
+
+    EXPECT_EQ(disconnected_callbacks.load(std::memory_order_relaxed), 2);
+    EXPECT_EQ(sess->disconnect_count.load(), 1);
+}
+
 TEST_F(SessionLifecycleTest, PauseRecvBeforeStartDefersReadsUntilResume) {
     auto [local_fd, remote_fd] = MakeSocketPair();
 

@@ -24,11 +24,10 @@ target_compile_features(my_echo PRIVATE cxx_std_23)
 Include:
 
 ```cpp
-#include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/core/Listener.h>
 #include <iouring_runtime/core/SendBuffer.h>
 #include <iouring_runtime/core/Session.h>
 #include <iouring_runtime/core/Types.h>
+#include <iouring_runtime/core/Worker.h>
 ```
 
 Minimal receive handler:
@@ -55,6 +54,25 @@ private:
         }
     }
 };
+```
+
+Start the server with a worker:
+
+```cpp
+iouring_runtime::core::io::SessionFactory factory =
+    [](int fd,
+       iouring_runtime::core::ring::IoRing& ring,
+       iouring_runtime::core::buffer::BufferPool& pool,
+       iouring_runtime::core::ContextId)
+        -> iouring_runtime::core::io::SessionRef {
+    return std::make_shared<EchoSession>(fd, ring, pool);
+};
+
+iouring_runtime::core::io::WorkerConfig config;
+config.address = {"0.0.0.0", 19090};
+
+iouring_runtime::core::io::Worker worker(config, std::move(factory));
+worker.Start();
 ```
 
 Full example: `app/examples/runtime/core_echo/`.

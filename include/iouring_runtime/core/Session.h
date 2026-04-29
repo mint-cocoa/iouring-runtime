@@ -16,6 +16,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <sys/socket.h>
@@ -91,6 +92,26 @@ public:
     void SetSessionId(iouring_runtime::core::SessionId id) { session_id_ = id; }
     void SetConnectedCallback(ConnectedCallback cb) { on_connected_ = std::move(cb); }
     void SetDisconnectCallback(DisconnectCallback cb) { on_disconnect_ = std::move(cb); }
+    void AddConnectedCallback(ConnectedCallback cb) {
+        auto previous = std::move(on_connected_);
+        on_connected_ = [previous = std::move(previous),
+                         cb = std::move(cb)](SessionRef session) mutable {
+            if (previous)
+                previous(session);
+            if (cb)
+                cb(std::move(session));
+        };
+    }
+    void AddDisconnectCallback(DisconnectCallback cb) {
+        auto previous = std::move(on_disconnect_);
+        on_disconnect_ = [previous = std::move(previous),
+                          cb = std::move(cb)](SessionRef session) mutable {
+            if (previous)
+                previous(session);
+            if (cb)
+                cb(std::move(session));
+        };
+    }
     void SetSendOverflowCallback(SendOverflowCallback cb) { on_send_overflow_ = std::move(cb); }
     void SetBackpressureCallback(BackpressureCallback cb) { on_backpressure_ = std::move(cb); }
     void SetBackpressureWatermarks(std::size_t high, std::size_t low) {

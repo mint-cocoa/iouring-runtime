@@ -1,3 +1,4 @@
+#include <iouring_runtime/proxy/AcmeHttpChallengeServer.h>
 #include <iouring_runtime/proxy/TcpProxyServer.h>
 
 #include <gtest/gtest.h>
@@ -937,31 +938,25 @@ TEST(TcpProxyServerTest, ReloadsDownstreamTlsWithoutDroppingExistingSessions) {
     upstream.Stop();
 }
 
-TEST(TcpProxyServerTest, ServesCertbotHttp01ChallengeFiles) {
-    EchoServer upstream;
+TEST(AcmeHttpChallengeServerTest, ServesHttp01ChallengeFiles) {
     auto challenge_files = CreateTestChallengeFiles();
     ASSERT_FALSE(challenge_files.dir.empty());
 
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring_runtime::proxy::AcmeHttpChallengeConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
-    config.upstream_host = "127.0.0.1";
-    config.upstream_port = upstream.Port();
     config.worker_count = 1;
     config.ring.queue_depth = 128;
     config.ring.buf_count = 64;
     config.ring.buf_size = 4096;
     config.ring.io_timeout = 1ms;
-    config.timeouts.connect = 500ms;
-    config.timeouts.inactivity = 2s;
-    config.certbot.challenge_host = "127.0.0.1";
-    config.certbot.challenge_port = ReserveTcpPort();
-    config.certbot.challenge_webroot = challenge_files.dir;
+    config.inactivity_timeout = 2s;
+    config.webroot = challenge_files.dir;
 
-    iouring_runtime::proxy::TcpProxyServer proxy(config);
-    proxy.Start();
+    iouring_runtime::proxy::AcmeHttpChallengeServer server(config);
+    server.Start();
 
-    const int client = ConnectWithRetry(config.certbot.challenge_port);
+    const int client = ConnectWithRetry(config.listen_port);
     ASSERT_GE(client, 0);
 
     const std::string request =
@@ -974,6 +969,5 @@ TEST(TcpProxyServerTest, ServesCertbotHttp01ChallengeFiles) {
     EXPECT_NE(response.find(challenge_files.body), std::string::npos);
 
     ::close(client);
-    proxy.Stop();
-    upstream.Stop();
+    server.Stop();
 }

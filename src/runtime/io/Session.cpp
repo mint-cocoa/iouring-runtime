@@ -164,7 +164,7 @@ void Session::Disconnect() {
 
 // -- Recv handling (fast/slow path + multishot + ENOBUFS) ----
 
-void Session::OnRecv(ring::RecvEvent& ev,
+void Session::OnRecv(ring::RecvEvent&,
                      std::int32_t res, std::uint32_t flags) {
     const bool more = (flags & IORING_CQE_F_MORE) != 0;
     const bool has_buffer = (flags & IORING_CQE_F_BUFFER) != 0;
@@ -234,8 +234,7 @@ void Session::OnRecv(ring::RecvEvent& ev,
         RegisterRecv();
 }
 
-void Session::OnDisconnect(ring::DisconnectEvent& ev,
-                           std::int32_t res) {
+void Session::OnDisconnect(ring::DisconnectEvent&, std::int32_t) {
     --pending_io_;
     TryRelease();
 }

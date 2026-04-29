@@ -96,6 +96,9 @@ private:
                     std::uint32_t submit_batch_size,
                     std::uint32_t cqe_batch_budget);
     int FlushSubmissions();
+    void ArmWakePoll();
+    void DrainWakeFd() noexcept;
+    void Wake() noexcept;
 
     io_uring* ring_;
     std::unique_ptr<RingBuffer> buf_ring_;
@@ -105,6 +108,8 @@ private:
 
     TracyLockable(std::mutex, post_mutex_);
     std::vector<std::move_only_function<void()>> posted_;
+    int wake_fd_{-1};
+    bool wake_poll_armed_{false};
 
     static thread_local IoRing* t_current_;
 };

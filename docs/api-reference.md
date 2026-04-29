@@ -120,11 +120,14 @@ Target:
 Headers:
 
 - `<iouring_runtime/proxy/TcpProxyServer.h>`
+- `<iouring_runtime/proxy/AcmeHttpChallengeServer.h>`
 
 Primary types:
 
 - `iouring_runtime::proxy::TcpProxyConfig`
 - `iouring_runtime::proxy::TcpProxyServer`
+- `iouring_runtime::proxy::AcmeHttpChallengeConfig`
+- `iouring_runtime::proxy::AcmeHttpChallengeServer`
 
 Example:
 

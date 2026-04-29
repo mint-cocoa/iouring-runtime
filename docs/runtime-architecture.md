@@ -50,6 +50,7 @@ Core does not own:
 The usual core flow is:
 
 ```text
+Worker::Start
 IoRing::Create
 BufferPool
 SessionFactory
@@ -60,9 +61,16 @@ Session::Send
 Session::Disconnect or DisconnectAfterFlush
 ```
 
+`Worker` is the standard execution unit: one thread, one `IoRing`, one
+`BufferPool`, one `Listener`, and the sessions accepted on that listener.
 `Listener` accepts sockets and asks a `SessionFactory` to create a protocol
 session. The runtime owns the I/O lifecycle; the session subclass owns protocol
 behavior.
+
+Cross-thread work is sent to a ring with `IoRing::Post` / `RunOnRing`.
+Posted work wakes the target ring, so owner-thread operations such as session
+disconnect, listener stop, and cross-worker sends do not wait for the dispatch
+timeout.
 
 ## Optional Modules
 
@@ -82,8 +90,8 @@ behavior.
 - upstream connector
 - bidirectional stream bridge
 - optional downstream TLS termination
-- optional ACME HTTP-01 responder
 - SNI-based upstream routes
+- standalone ACME HTTP-01 challenge server
 - metrics snapshots
 
 `RuntimeGame` adds:

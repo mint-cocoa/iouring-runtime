@@ -84,9 +84,10 @@ private:
 };
 ```
 
-## Create A Listener
+## Start A Worker
 
-`Listener` accepts sockets and creates sessions through a factory.
+A `Worker` owns one `IoRing`, one `BufferPool`, one `Listener`, a thread, and
+the sessions accepted by that listener.
 
 ```cpp
 iouring_runtime::core::io::SessionFactory factory =
@@ -98,40 +99,45 @@ iouring_runtime::core::io::SessionFactory factory =
     return std::make_shared<EchoSession>(fd, ring, pool);
 };
 
-iouring_runtime::core::Address address{
+iouring_runtime::core::io::WorkerConfig config;
+config.address = {
     .host = "0.0.0.0",
     .port = 19090,
 };
+config.io_timeout = std::chrono::milliseconds{10};
 
-auto listener = std::make_shared<iouring_runtime::core::io::Listener>(
-    *ring, pool, address, std::move(factory), 0);
-
-auto started = listener->Start();
-if (!started) {
+iouring_runtime::core::io::Worker worker(config, std::move(factory));
+if (!worker.Start()) {
     return 1;
 }
 ```
 
-## Drive The Ring
+## Drive Process Lifetime
 
-The core runtime is explicit: your process owns the event loop.
+The worker owns the event loop. The process only waits for shutdown and stops
+the worker.
 
 ```cpp
 while (!stop_requested.load(std::memory_order_relaxed)) {
-    ring->Dispatch(std::chrono::milliseconds{10});
-    ring->ProcessPostedTasks();
+    std::this_thread::sleep_for(std::chrono::milliseconds{100});
 }
 
-listener->Stop();
+worker.Stop();
 ```
 
-If you use `GlobalQueue`, drain posted jobs inside the loop:
+If you use `GlobalQueue`, drain posted jobs from a worker tick hook:
 
 ```cpp
-while (auto* queue = global_queue.TryPop()) {
-    queue->Execute();
-}
+iouring_runtime::core::io::WorkerHooks hooks;
+hooks.tick = [&global_queue](iouring_runtime::core::io::Worker&) {
+    while (auto* queue = global_queue.TryPop()) {
+        queue->Execute();
+    }
+};
 ```
+
+Lower-level code can still build directly from `IoRing`, `BufferPool`, and
+`Listener` when it needs full control.
 
 ## Add Idle Timeouts
 

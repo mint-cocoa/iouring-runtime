@@ -111,6 +111,9 @@ void ProxyConnector::OnConnect(core::ring::ConnectEvent&, std::int32_t result) {
         socket_.Release(), ring_, pool_, bridge_, PeerRole::kUpstream,
         config_.backpressure.send_queue_max_pending);
     ConfigureProxySession(upstream, worker_, config_);
+    if (worker_.io_worker) {
+        worker_.io_worker->TrackSession(upstream);
+    }
     upstream->Start();
     bridge_->AttachUpstream(ToProxyPeer(upstream));
 

@@ -1,6 +1,5 @@
 #include <iouring_runtime/proxy/TcpProxyServer.h>
 
-#include "AcmeChallengeSession.h"
 #include "DownstreamTlsContext.h"
 #include "ProxyCommon.h"
 #include "ProxyConnector.h"
@@ -242,28 +241,11 @@ void TcpProxyServer::Start() {
     }
 
     bool any_main_listener = false;
-    bool any_challenge_listener = !config_.certbot.Enabled();
 
     for (std::uint16_t i = 0; i < config_.worker_count; ++i) {
         auto worker = std::make_unique<detail::TcpProxyWorker>();
         auto* raw_worker = worker.get();
         worker->index = i;
-
-        core::ring::IoRingConfig ring_config;
-        ring_config.queue_depth = config_.ring.queue_depth;
-        ring_config.buf_ring.buf_count = config_.ring.buf_count;
-        ring_config.buf_ring.buf_size = config_.ring.buf_size;
-        ring_config.buf_ring.group_id = static_cast<std::uint16_t>(i + 1);
-        ring_config.submit_batch_size = config_.ring.submit_batch_size;
-        ring_config.cqe_batch_budget = config_.ring.cqe_batch_budget;
-
-        auto ring_result = core::ring::IoRing::Create(ring_config);
-        if (!ring_result) {
-            obs::LogError(kLogCategory, "TcpProxyServer: failed to create IoRing for worker {}",
-                          i);
-            continue;
-        }
-        worker->ring = std::move(*ring_result);
 
         core::io::SessionFactory proxy_factory =
             [this, raw_worker](int fd, core::ring::IoRing& ring,
@@ -303,63 +285,45 @@ void TcpProxyServer::Start() {
             return session;
         };
 
-        core::Address addr{config_.listen_host, config_.listen_port};
-        worker->listener = std::make_shared<core::io::Listener>(
-            *worker->ring, worker->pool, addr, std::move(proxy_factory), i,
-            config_.max_sessions_per_worker);
-        worker->listener->SetSessionCountFn([raw_worker]() {
-            return raw_worker->live_sessions.load(std::memory_order_relaxed) +
-                   raw_worker->live_connectors.load(std::memory_order_relaxed);
-        });
+        core::io::WorkerConfig worker_config;
+        worker_config.id = i;
+        worker_config.address = core::Address{
+            config_.listen_host, config_.listen_port};
+        worker_config.ring.queue_depth = config_.ring.queue_depth;
+        worker_config.ring.buf_ring.buf_count = config_.ring.buf_count;
+        worker_config.ring.buf_ring.buf_size = config_.ring.buf_size;
+        worker_config.ring.buf_ring.group_id = static_cast<std::uint16_t>(i + 1);
+        worker_config.ring.submit_batch_size = config_.ring.submit_batch_size;
+        worker_config.ring.cqe_batch_budget = config_.ring.cqe_batch_budget;
+        worker_config.buffer_chunk_size = 256 * 1024;
+        worker_config.buffer_max_chunks = 1024;
+        worker_config.max_sessions = config_.max_sessions_per_worker;
+        worker_config.io_timeout = config_.ring.io_timeout;
+        worker_config.drain_timeout = config_.shutdown.drain_timeout;
+        worker_config.force_close_timeout = config_.shutdown.force_close_timeout;
+        worker_config.extra_session_count = [raw_worker] {
+            return raw_worker->live_connectors.load(std::memory_order_relaxed);
+        };
 
-        auto listen_result = worker->listener->Start();
-        if (!listen_result) {
-            obs::LogError(kLogCategory, "TcpProxyServer: worker {} failed to listen on {}:{}",
-                          i, config_.listen_host, config_.listen_port);
+        core::io::WorkerHooks hooks;
+        hooks.on_start = [this, raw_worker](core::io::Worker&) {
+            ConfigureWorkerThread(*raw_worker);
+        };
+
+        worker->io_worker = std::make_unique<core::io::Worker>(
+            std::move(worker_config), std::move(proxy_factory), std::move(hooks));
+
+        if (!worker->io_worker->Start()) {
+            obs::LogError(kLogCategory, "TcpProxyServer: worker {} failed to listen",
+                          i);
             continue;
         }
+
         any_main_listener = true;
-
-        if (config_.certbot.Enabled()) {
-            core::io::SessionFactory challenge_factory =
-                [this, raw_worker](int fd, core::ring::IoRing& ring,
-                                   core::buffer::BufferPool& pool, core::ContextId)
-                    -> core::io::SessionRef {
-                auto session = detail::CreateAcmeChallengeSession(
-                    fd, ring, pool, config_.certbot.challenge_webroot,
-                    config_.backpressure.send_queue_max_pending);
-                detail::ConfigureProxySession(session, *raw_worker, config_);
-                return session;
-            };
-
-            core::Address challenge_addr{config_.certbot.challenge_host,
-                                         config_.certbot.challenge_port};
-            worker->challenge_listener = std::make_shared<core::io::Listener>(
-                *worker->ring, worker->pool, challenge_addr,
-                std::move(challenge_factory), i,
-                config_.max_sessions_per_worker);
-            worker->challenge_listener->SetSessionCountFn([raw_worker]() {
-                return raw_worker->live_sessions.load(std::memory_order_relaxed) +
-                       raw_worker->live_connectors.load(std::memory_order_relaxed);
-            });
-
-            auto challenge_result = worker->challenge_listener->Start();
-            if (!challenge_result) {
-                obs::LogError(kLogCategory,
-                    "TcpProxyServer: worker {} failed to listen on ACME challenge {}:{}",
-                    i, config_.certbot.challenge_host, config_.certbot.challenge_port);
-            } else {
-                any_challenge_listener = true;
-            }
-        }
-
-        worker->thread = std::thread([this, raw_worker]() {
-            WorkerLoop(*raw_worker);
-        });
         workers_.push_back(std::move(worker));
     }
 
-    if (!any_main_listener || !any_challenge_listener || workers_.empty()) {
+    if (!any_main_listener || workers_.empty()) {
         running_.store(false, std::memory_order_release);
         Stop();
         obs::LogError(kLogCategory, "TcpProxyServer: failed to start required listeners");
@@ -367,31 +331,11 @@ void TcpProxyServer::Start() {
     }
 
     const bool tls_enabled = CurrentDownstreamTlsContext() != nullptr;
-    if (tls_enabled && config_.certbot.Enabled()) {
-        obs::LogInfo(kLogCategory,
-            "TcpProxyServer: listening on {}:{} -> {} ({} workers, downstream TLS enabled, ACME challenge on {}:{})",
-            config_.listen_host, config_.listen_port, upstream_endpoint_->display,
-            workers_.size(), config_.certbot.challenge_host,
-            config_.certbot.challenge_port);
-        StartMetricsWriter();
-        return;
-    }
-
     if (tls_enabled) {
         obs::LogInfo(kLogCategory,
             "TcpProxyServer: listening on {}:{} -> {} ({} workers, downstream TLS enabled)",
             config_.listen_host, config_.listen_port, upstream_endpoint_->display,
             workers_.size());
-        StartMetricsWriter();
-        return;
-    }
-
-    if (config_.certbot.Enabled()) {
-        obs::LogInfo(kLogCategory,
-            "TcpProxyServer: listening on {}:{} -> {} ({} workers, ACME challenge on {}:{})",
-            config_.listen_host, config_.listen_port, upstream_endpoint_->display,
-            workers_.size(), config_.certbot.challenge_host,
-            config_.certbot.challenge_port);
         StartMetricsWriter();
         return;
     }
@@ -428,9 +372,7 @@ void TcpProxyServer::Stop() {
     }
 
     for (auto& worker : workers_) {
-        if (worker->thread.joinable()) {
-            worker->thread.join();
-        }
+        worker->io_worker->Stop();
     }
     workers_.clear();
     {
@@ -639,7 +581,7 @@ std::string TcpProxyServer::SnapshotMetricsJson() const {
     for (std::size_t i = 0; i < workers_.size(); ++i) {
         const auto& worker = *workers_[i];
         const auto live_sessions =
-            worker.live_sessions.load(std::memory_order_relaxed);
+            worker.io_worker ? worker.io_worker->LiveSessions() : 0;
         const auto live_connectors =
             worker.live_connectors.load(std::memory_order_relaxed);
         total_live_sessions += live_sessions;

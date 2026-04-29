@@ -92,7 +92,7 @@ void Listener::Stop() {
     listen_fd_.Reset();
 }
 
-void Listener::OnAccept(ring::AcceptEvent& ev, std::int32_t result, std::uint32_t flags) {
+void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t flags) {
     ZoneScoped;
 
     if (result < 0) {

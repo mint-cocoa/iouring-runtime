@@ -1,7 +1,6 @@
 #pragma once
 
-#include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/core/Listener.h>
+#include <iouring_runtime/core/Worker.h>
 #include <iouring_runtime/web/HttpMethod.h>
 #include <iouring_runtime/web/HttpParser.h>
 #include <iouring_runtime/web/HttpSession.h>
@@ -11,10 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
-#include <unordered_map>
 #include <vector>
 
 namespace iouring_runtime::web {
@@ -116,21 +112,15 @@ private:
     struct Worker {
         std::uint16_t index{0};
         int pinned_cpu{-1};
-        std::unique_ptr<core::ring::IoRing> ring;
-        std::shared_ptr<core::io::Listener> listener;
-        core::buffer::BufferPool pool;
-        std::atomic<std::size_t> live_sessions{0};
-        std::mutex sessions_mu;
-        std::unordered_map<core::io::Session*, core::io::SessionRef> sessions;
         std::atomic<core::SessionId> next_session_id{1};
-        std::thread thread;
+        std::unique_ptr<core::io::Worker> io_worker;
     };
 
     void StopAccepting();
     void DrainSessions(bool force_close);
     bool WaitForZeroSessions(std::chrono::milliseconds timeout);
     void ConfigureWorkerAffinity(Worker& worker);
-    void WorkerLoop(Worker& worker);
+    void ConfigureWorkerThread(Worker& worker);
 
     WebServerConfig config_;
     Router router_;

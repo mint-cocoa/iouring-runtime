@@ -70,16 +70,6 @@ struct TcpProxyConfig {
         }
     };
 
-    struct CertbotOptions {
-        std::string challenge_host = "0.0.0.0";
-        std::uint16_t challenge_port = 0;
-        std::string challenge_webroot;
-
-        bool Enabled() const noexcept {
-            return challenge_port != 0 && !challenge_webroot.empty();
-        }
-    };
-
     struct MetricsOptions {
         std::string file_path;
         std::chrono::milliseconds interval{1000};
@@ -105,7 +95,6 @@ struct TcpProxyConfig {
     ShutdownOptions shutdown;
     BackpressureOptions backpressure;
     DownstreamTlsOptions downstream_tls;
-    CertbotOptions certbot;
     MetricsOptions metrics;
 };
 
@@ -148,7 +137,7 @@ private:
     void DrainSessions(bool force_close);
     bool WaitForZeroConnections(std::chrono::milliseconds timeout);
     void ConfigureWorkerAffinity(detail::TcpProxyWorker& worker);
-    void WorkerLoop(detail::TcpProxyWorker& worker);
+    void ConfigureWorkerThread(detail::TcpProxyWorker& worker);
     void StartMetricsWriter();
     void StopMetricsWriter();
 

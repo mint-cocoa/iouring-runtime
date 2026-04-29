@@ -12,15 +12,15 @@ public:
     void Dispatch(IoEvent* ev, std::int32_t result, std::uint32_t flags);
 
 protected:
-    virtual void OnAccept(AcceptEvent& ev, std::int32_t result, std::uint32_t flags) {}
-    virtual void OnRecv(RecvEvent& ev, std::int32_t result, std::uint32_t flags) {}
-    virtual void OnRead(ReadEvent& ev, std::int32_t result) {}
-    virtual void OnWrite(WriteEvent& ev, std::int32_t result) {}
-    virtual void OnSend(SendEvent& ev, std::int32_t result) {}
-    virtual void OnConnect(ConnectEvent& ev, std::int32_t result) {}
-    virtual void OnDisconnect(DisconnectEvent& ev, std::int32_t result) {}
-    virtual void OnPoll(PollEvent& ev, std::int32_t result) {}
-    virtual void OnTimeout(TimeoutEvent& ev, std::int32_t result) {}
+    virtual void OnAccept(AcceptEvent&, std::int32_t, std::uint32_t) {}
+    virtual void OnRecv(RecvEvent&, std::int32_t, std::uint32_t) {}
+    virtual void OnRead(ReadEvent&, std::int32_t) {}
+    virtual void OnWrite(WriteEvent&, std::int32_t) {}
+    virtual void OnSend(SendEvent&, std::int32_t) {}
+    virtual void OnConnect(ConnectEvent&, std::int32_t) {}
+    virtual void OnDisconnect(DisconnectEvent&, std::int32_t) {}
+    virtual void OnPoll(PollEvent&, std::int32_t) {}
+    virtual void OnTimeout(TimeoutEvent&, std::int32_t) {}
 };
 
 inline void EventHandler::Dispatch(IoEvent* ev, std::int32_t result, std::uint32_t flags) {

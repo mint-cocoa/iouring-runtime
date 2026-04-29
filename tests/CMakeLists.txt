@@ -34,6 +34,10 @@ add_executable(test_cross_thread_flow io/test_cross_thread_flow.cpp)
 target_link_libraries(test_cross_thread_flow PRIVATE Runtime GTest::gtest_main)
 add_test(NAME test_cross_thread_flow COMMAND test_cross_thread_flow)
 
+add_executable(test_worker io/test_worker.cpp)
+target_link_libraries(test_worker PRIVATE Runtime GTest::gtest_main)
+add_test(NAME test_worker COMMAND test_worker)
+
 add_executable(test_job_queue job/test_job_queue.cpp)
 target_link_libraries(test_job_queue PRIVATE Runtime GTest::gtest_main)
 add_test(NAME test_job_queue COMMAND test_job_queue)

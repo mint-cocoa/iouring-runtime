@@ -1,7 +1,5 @@
 #include <iouring_runtime/proxy/TcpProxyServer.h>
 
-#include <iouring_runtime/core/IoRing.h>
-
 #include "common/CpuAffinity.h"
 #include "ProxyCommon.h"
 #include "ProxyConnector.h"
@@ -25,15 +23,7 @@ namespace iouring_runtime::proxy {
 
 void TcpProxyServer::StopAccepting() {
     for (auto& worker : workers_) {
-        worker->ring->Post([listener = worker->listener,
-                            challenge_listener = worker->challenge_listener] {
-            if (listener) {
-                listener->Stop();
-            }
-            if (challenge_listener) {
-                challenge_listener->Stop();
-            }
-        });
+        worker->io_worker->StopAccepting();
     }
 }
 
@@ -52,7 +42,7 @@ void TcpProxyServer::CancelConnectors() {
             continue;
         }
 
-        worker->ring->Post([connectors = std::move(connectors)]() mutable {
+        worker->io_worker->Post([connectors = std::move(connectors)]() mutable {
             for (auto& connector : connectors) {
                 if (connector) {
                     connector->Cancel();
@@ -64,31 +54,7 @@ void TcpProxyServer::CancelConnectors() {
 
 void TcpProxyServer::DrainSessions(bool force_close) {
     for (auto& worker : workers_) {
-        std::vector<core::io::SessionRef> sessions;
-        {
-            std::lock_guard lock(worker->sessions_mu);
-            sessions.reserve(worker->sessions.size());
-            for (const auto& [_, session] : worker->sessions) {
-                sessions.push_back(session);
-            }
-        }
-
-        if (sessions.empty()) {
-            continue;
-        }
-
-        worker->ring->Post([sessions = std::move(sessions), force_close]() mutable {
-            for (auto& session : sessions) {
-                if (!session || session->Disconnecting()) {
-                    continue;
-                }
-                if (force_close) {
-                    session->Disconnect();
-                } else {
-                    session->DisconnectAfterFlush();
-                }
-            }
-        });
+        worker->io_worker->DrainSessions(force_close);
     }
 }
 
@@ -97,7 +63,7 @@ bool TcpProxyServer::WaitForZeroConnections(std::chrono::milliseconds timeout) {
     for (;;) {
         bool all_zero = true;
         for (const auto& worker : workers_) {
-            if (worker->live_sessions.load(std::memory_order_relaxed) != 0 ||
+            if (worker->io_worker->LiveSessions() != 0 ||
                 worker->live_connectors.load(std::memory_order_relaxed) != 0) {
                 all_zero = false;
                 break;
@@ -143,23 +109,13 @@ void TcpProxyServer::ConfigureWorkerAffinity(detail::TcpProxyWorker& worker) {
                  worker.index, worker.pinned_cpu);
 }
 
-void TcpProxyServer::WorkerLoop(detail::TcpProxyWorker& worker) {
+void TcpProxyServer::ConfigureWorkerThread(detail::TcpProxyWorker& worker) {
     char tracy_thread_name[32] = {};
     std::snprintf(tracy_thread_name, sizeof(tracy_thread_name),
                   "proxy-worker-%u", static_cast<unsigned>(worker.index));
     TracyCSetThreadName(tracy_thread_name);
 
     ConfigureWorkerAffinity(worker);
-    core::ring::IoRing::SetCurrent(worker.ring.get());
-    while (running_.load(std::memory_order_relaxed)) {
-        worker.ring->Dispatch(config_.ring.io_timeout);
-        worker.ring->ProcessPostedTasks();
-    }
-
-    worker.ring->ProcessPostedTasks();
-    for (int i = 0; i < 8; ++i) {
-        worker.ring->Dispatch(std::chrono::milliseconds{0});
-    }
 }
 
 } // namespace iouring_runtime::proxy

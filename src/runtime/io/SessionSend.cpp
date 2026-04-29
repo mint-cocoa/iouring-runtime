@@ -35,7 +35,7 @@ std::expected<void, io::IoError> Session::Send(buffer::SendBufferRef buf) {
     return {};
 }
 
-void Session::OnSend(ring::SendEvent& ev, std::int32_t res) {
+void Session::OnSend(ring::SendEvent&, std::int32_t res) {
     --pending_io_;
 
     if (disconnecting_) {
