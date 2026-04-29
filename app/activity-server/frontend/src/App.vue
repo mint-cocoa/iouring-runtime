@@ -27,6 +27,7 @@ const chatName = ref(getAnonymousName())
 const sidebarTab = ref('queue')
 const isSidebarVisible = ref(true)
 const instanceId = ref(new URLSearchParams(window.location.search).get('room') || 'default')
+const nextRequestInFlight = ref(false)
 
 // -- Socket Integration --
 const showToast = (msg, type='info') => console.log(`[Toast ${type}] ${msg}`)
@@ -79,6 +80,10 @@ const videoUrl = computed(() => {
     }
 })
 
+watch(videoUrl, () => {
+    nextRequestInFlight.value = false
+})
+
 // -- Handlers --
 const handleDownload = async () => {
     const urlToLoad = urlInput.value.trim()
@@ -117,6 +122,25 @@ const handleSendChat = () => {
     if (sent) chatInput.value = ''
 }
 
+const handlePlayerEnded = async () => {
+    if (nextRequestInFlight.value) return
+    nextRequestInFlight.value = true
+
+    try {
+        const response = await fetchWithNgrok('/api/next', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instance_id: instanceId.value })
+        })
+        if (!response.ok) {
+            throw new Error(`Next request failed: ${response.status}`)
+        }
+    } catch (err) {
+        nextRequestInFlight.value = false
+        console.error('Advance queue failed', err)
+    }
+}
+
 </script>
 
 <template>
@@ -153,6 +177,7 @@ const handleSendChat = () => {
                       key="shaka-player-instance"
                       :videoUrl="videoUrl"
                       :serverPlaybackState="serverPlaybackState"
+                      @ended="handlePlayerEnded"
                    />
                </div>
                

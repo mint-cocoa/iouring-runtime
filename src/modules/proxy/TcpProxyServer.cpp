@@ -269,7 +269,7 @@ void TcpProxyServer::Start() {
                     },
                     detail::PeerRole::kDownstream,
                     config_.backpressure.send_queue_max_pending,
-                    config_.pending_connect_buffer_limit);
+                    config_.downstream_tls.pending_plaintext_limit);
             } else {
                 if (!StartConnector(ring, pool, *upstream_endpoint_, *raw_worker,
                                     bridge)) {

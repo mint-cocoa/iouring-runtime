@@ -18,7 +18,7 @@ const props = defineProps({
     }
 })
 
-const emit = defineEmits(['toast'])
+const emit = defineEmits(['toast', 'ended'])
 
 const containerRef = ref(null)
 const videoRef = ref(null)
@@ -290,6 +290,9 @@ const handleVolumeChange = () => {
 
 const handleEnded = () => {
     isPlaying.value = false
+    if (!isLive.value) {
+        emit('ended')
+    }
 }
 
 watch(() => props.serverPlaybackState, (state) => {

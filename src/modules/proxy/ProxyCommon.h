@@ -3,7 +3,7 @@
 #include <iouring_runtime/core/SendBuffer.h>
 #include <iouring_runtime/core/Session.h>
 #include <iouring_runtime/core/Worker.h>
-#include <iouring_runtime/proxy/TcpProxyServer.h>
+#include <iouring_runtime/proxy/TcpProxyConfig.h>
 
 #include <atomic>
 #include <expected>

@@ -5,6 +5,7 @@
 #include <openssl/ssl.h>
 
 #include <array>
+#include <deque>
 #include <utility>
 
 #include <iouring_runtime/observability/Logging.h>
@@ -116,6 +117,9 @@ public:
         if (!handshake_complete_) {
             return QueuePendingPlaintext(data);
         }
+        if (BackpressureActive()) {
+            return QueuePendingPlaintext(data);
+        }
         return EncryptAndQueuePlaintext(data);
     }
 
@@ -162,6 +166,12 @@ protected:
 
     void OnDisconnected() final {
         bridge_->OnPeerDisconnected(role_);
+    }
+
+    void OnSocketDrained() final {
+        if (!FlushPendingPlaintext()) {
+            Disconnect();
+        }
     }
 
 private:
@@ -221,9 +231,10 @@ private:
             return true;
         }
 
-        auto pending = std::move(pending_plaintext_);
-        pending_plaintext_bytes_ = 0;
-        for (auto& chunk : pending) {
+        while (!pending_plaintext_.empty() && !BackpressureActive()) {
+            auto chunk = std::move(pending_plaintext_.front());
+            pending_plaintext_.pop_front();
+            pending_plaintext_bytes_ -= chunk.size();
             if (!EncryptAndQueuePlaintext(
                     std::span<const std::byte>(chunk.data(), chunk.size()))) {
                 return false;
@@ -436,7 +447,7 @@ private:
     bool handshake_complete_{false};
     bool ready_notified_{false};
     std::size_t pending_plaintext_bytes_{0};
-    std::vector<std::vector<std::byte>> pending_plaintext_;
+    std::deque<std::vector<std::byte>> pending_plaintext_;
     std::array<std::byte, 16 * 1024> plain_buffer_{};
     std::array<std::byte, 64 * 1024> ciphertext_buffer_{};
 };

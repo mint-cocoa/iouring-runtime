@@ -322,6 +322,10 @@ AppConfig LoadConfigFromEnv() {
     config.downstream_tls.private_key_file =
         ReadStringEnv("TCP_PROXY_TLS_KEY_FILE",
                       config.downstream_tls.private_key_file);
+    config.downstream_tls.pending_plaintext_limit =
+        ReadUnsignedEnv<std::uint32_t>(
+            "TCP_PROXY_TLS_PENDING_PLAINTEXT_LIMIT",
+            config.downstream_tls.pending_plaintext_limit);
 
     acme_http.listen_host =
         ReadStringEnv("TCP_PROXY_CERTBOT_CHALLENGE_HOST",

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <iouring_runtime/proxy/TcpProxyServer.h>
+#include <iouring_runtime/proxy/TcpProxyConfig.h>
 
 #include <openssl/ssl.h>
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iouring_runtime/proxy/TcpProxyConfig.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -27,76 +29,6 @@ struct TcpProxyWorker;
 struct DownstreamTlsContext;
 class ProxyBridge;
 } // namespace detail
-
-struct TcpProxyConfig {
-    enum class WorkerAffinityMode {
-        kOff,
-        kPhysicalCores,
-        kLogicalCpus,
-    };
-
-    struct RingOptions {
-        std::uint32_t queue_depth = 2048;
-        std::uint32_t buf_count = 4096;
-        std::uint32_t buf_size = 4096;
-        std::uint32_t submit_batch_size = 1;
-        std::uint32_t cqe_batch_budget = 0;
-        std::chrono::milliseconds io_timeout{1};
-    };
-
-    struct TimeoutOptions {
-        std::chrono::milliseconds inactivity{30000};
-        std::chrono::milliseconds connect{3000};
-    };
-
-    struct ShutdownOptions {
-        std::chrono::milliseconds drain_timeout{1000};
-        std::chrono::milliseconds force_close_timeout{200};
-    };
-
-    struct BackpressureOptions {
-        std::uint32_t send_queue_max_pending = 16384;
-        std::uint32_t send_queue_high_watermark = 8192;
-        std::uint32_t send_queue_low_watermark = 2048;
-        bool disconnect_on_high_watermark = false;
-    };
-
-    struct DownstreamTlsOptions {
-        std::string certificate_chain_file;
-        std::string private_key_file;
-
-        bool Enabled() const noexcept {
-            return !certificate_chain_file.empty() || !private_key_file.empty();
-        }
-    };
-
-    struct MetricsOptions {
-        std::string file_path;
-        std::chrono::milliseconds interval{1000};
-    };
-
-    struct UpstreamRoute {
-        std::string hostname;
-        std::string upstream_host;
-        std::uint16_t upstream_port = 0;
-    };
-
-    std::string listen_host = "0.0.0.0";
-    std::uint16_t listen_port = 8080;
-    std::string upstream_host = "127.0.0.1";
-    std::uint16_t upstream_port = 9000;
-    std::vector<UpstreamRoute> upstream_routes;
-    std::uint16_t worker_count = 4;
-    WorkerAffinityMode worker_affinity = WorkerAffinityMode::kOff;
-    std::uint32_t max_sessions_per_worker = 0;
-    std::uint32_t pending_connect_buffer_limit = 256 * 1024;
-    RingOptions ring;
-    TimeoutOptions timeouts;
-    ShutdownOptions shutdown;
-    BackpressureOptions backpressure;
-    DownstreamTlsOptions downstream_tls;
-    MetricsOptions metrics;
-};
 
 class TcpProxyServer {
 public:
