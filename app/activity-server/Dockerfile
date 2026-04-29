@@ -38,6 +38,7 @@ RUN npm run build
 FROM ubuntu:24.04 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
+ARG TARGETARCH
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -45,10 +46,20 @@ RUN apt-get update \
         ffmpeg \
         libssl3 \
         liburing2 \
-        python3 \
-        python3-pip \
-    && python3 -m pip install --break-system-packages --no-cache-dir yt-dlp \
     && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${arch}" in \
+        amd64|x86_64) ytdlp_asset="yt-dlp_linux" ;; \
+        arm64|aarch64) ytdlp_asset="yt-dlp_linux_aarch64" ;; \
+        arm/v7|armhf) ytdlp_asset="yt-dlp_linux_armv7l" ;; \
+        *) echo "unsupported yt-dlp release architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fL --retry 3 -o /usr/local/bin/yt-dlp \
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${ytdlp_asset}"; \
+    chmod 0755 /usr/local/bin/yt-dlp; \
+    /usr/local/bin/yt-dlp --version
 
 RUN useradd --system --uid 10002 --home-dir /nonexistent --shell /usr/sbin/nologin activity \
     && mkdir -p /var/lib/iouring-runtime/activity-server/downloads \
