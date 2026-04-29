@@ -242,10 +242,12 @@ void ActivityHub::DownloadWorker(std::string task_id, std::string instance_id) {
         " " + ShellQuote(url);
 
     if (RunCommand(ytdlp) != 0 || !std::filesystem::exists(media_file)) {
-        std::lock_guard lock(mu_);
-        auto& task = tasks_[task_id];
-        task.status = "failed";
-        task.error = "yt-dlp failed";
+        {
+            std::lock_guard lock(mu_);
+            auto& task = tasks_[task_id];
+            task.status = "failed";
+            task.error = "yt-dlp failed";
+        }
         BroadcastText(instance_id, "{\"type\":\"DOWNLOAD_FAILED\",\"task_id\":\"" +
             JsonEscape(task_id) + "\",\"error\":\"yt-dlp failed\"}");
         return;
@@ -263,10 +265,12 @@ void ActivityHub::DownloadWorker(std::string task_id, std::string instance_id) {
         ShellQuote(segment_pattern.string()) + " " + ShellQuote(playlist.string());
     if ((RunCommand(ffmpeg_copy) != 0 || !std::filesystem::exists(playlist)) &&
         (RunCommand(ffmpeg_transcode) != 0 || !std::filesystem::exists(playlist))) {
-        std::lock_guard lock(mu_);
-        auto& task = tasks_[task_id];
-        task.status = "failed";
-        task.error = "ffmpeg hls failed";
+        {
+            std::lock_guard lock(mu_);
+            auto& task = tasks_[task_id];
+            task.status = "failed";
+            task.error = "ffmpeg hls failed";
+        }
         BroadcastText(instance_id, "{\"type\":\"DOWNLOAD_FAILED\",\"task_id\":\"" +
             JsonEscape(task_id) + "\",\"error\":\"ffmpeg hls failed\"}");
         return;
