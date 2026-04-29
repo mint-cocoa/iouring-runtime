@@ -8,12 +8,16 @@
 #include <iouring_runtime/observability/Logging.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <utility>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 namespace activity_server {
 
@@ -94,12 +98,23 @@ void ActivitySession::OnRecv(std::span<const std::byte> data) {
 }
 
 void ActivitySession::OnDisconnected() {
+    ResetFileStream();
     if (websocket_ && !client_id_.empty()) {
         obs::LogInfo(obs::LogCategory::kSession,
                      "activity websocket disconnected client_id={} instance_id={} fd={}",
                      client_id_, instance_id_, Fd());
     }
     hub_.Remove(*this);
+}
+
+bool ActivitySession::HasPendingAppWork() const {
+    return file_stream_.active;
+}
+
+void ActivitySession::OnSocketDrained() {
+    if (file_stream_.active) {
+        PumpFileStream();
+    }
 }
 
 void ActivitySession::ProcessHttpBuffer() {
@@ -225,8 +240,8 @@ void ActivitySession::HandleHttp(const HttpRequest& req) {
         SendHttp(200, "application/json", "{\"ok\":true}");
         return;
     }
-    if (req.method == "GET" && req.path.rfind("/hls/", 0) == 0) {
-        ServeHls(req.path);
+    if ((req.method == "GET" || req.method == "HEAD") && req.path.rfind("/hls/", 0) == 0) {
+        ServeHls(req);
         return;
     }
     if ((req.method == "GET" || req.method == "HEAD") && req.path == "/api/thumb") {
@@ -421,20 +436,19 @@ void ActivitySession::RemoveQueue(std::string_view body) {
     hub_.BroadcastState(instance_id);
 }
 
-void ActivitySession::ServeHls(const std::string& path) {
+void ActivitySession::ServeHls(const HttpRequest& req) {
     const auto root = std::filesystem::weakly_canonical(std::filesystem::path(
         EnvString("ACTIVITY_DOWNLOAD_DIR", "/var/lib/iouring-runtime/activity-server/downloads")) / "hls");
-    const auto rel = media::UrlDecode(std::string_view(path).substr(std::string_view("/hls/").size()));
+    const auto rel = media::UrlDecode(std::string_view(req.path).substr(std::string_view("/hls/").size()));
     const auto target = std::filesystem::weakly_canonical(root / rel);
     if (target.string().rfind(root.string(), 0) != 0 || !std::filesystem::is_regular_file(target)) {
         SendHttp(404, "text/plain", "Not Found");
         return;
     }
-    const auto body = ReadFile(target);
     std::string type = "application/octet-stream";
     if (target.extension() == ".m3u8") type = "application/vnd.apple.mpegurl";
     if (target.extension() == ".ts") type = "video/mp2t";
-    SendHttp(200, type, body);
+    SendFileResponse(req, target, type);
 }
 
 bool ActivitySession::ServeStaticFrontend(const HttpRequest& req) {
@@ -560,6 +574,166 @@ void ActivitySession::ExchangeDiscordToken(std::string_view body) {
         return;
     }
     SendHttp(200, "application/json", upstream.output);
+}
+
+void ActivitySession::SendFileResponse(const HttpRequest& req, const std::filesystem::path& path,
+                                       std::string_view content_type) {
+    std::error_code ec;
+    const auto file_size = std::filesystem::file_size(path, ec);
+    if (ec) {
+        SendHttp(404, "text/plain", "Not Found");
+        return;
+    }
+
+    std::uint64_t start = 0;
+    std::uint64_t end = file_size == 0 ? 0 : file_size - 1;
+    bool partial = false;
+    const auto range = Header(req, "range");
+    if (file_size > 0 && range.rfind("bytes=", 0) == 0) {
+        const auto spec = range.substr(6);
+        const auto dash = spec.find('-');
+        try {
+            if (dash != std::string::npos && dash > 0) {
+                start = std::stoull(spec.substr(0, dash));
+                if (dash + 1 < spec.size()) {
+                    end = std::min<std::uint64_t>(std::stoull(spec.substr(dash + 1)), file_size - 1);
+                }
+                partial = start <= end && start < file_size;
+            } else if (dash == 0 && spec.size() > 1) {
+                const auto suffix = std::min<std::uint64_t>(std::stoull(spec.substr(1)), file_size);
+                start = file_size - suffix;
+                end = file_size - 1;
+                partial = suffix > 0;
+            }
+        } catch (...) {
+            partial = false;
+            start = 0;
+            end = file_size - 1;
+        }
+        if (!partial) {
+            std::ostringstream out;
+            out << "HTTP/1.1 416 Range Not Satisfiable\r\n"
+                << "Server: iouring_activity_server\r\n"
+                << "Content-Range: bytes */" << file_size << "\r\n"
+                << "Content-Length: 0\r\n"
+                << "Access-Control-Allow-Origin: *\r\n"
+                << "Accept-Ranges: bytes\r\n"
+                << "Connection: close\r\n\r\n";
+            SendRaw(out.str());
+            DisconnectAfterFlush();
+            return;
+        }
+    }
+
+    const auto content_length = file_size == 0 ? 0 : (end - start + 1);
+    const int status = partial ? 206 : 200;
+    std::ostringstream headers;
+    headers << "HTTP/1.1 " << status << (partial ? " Partial Content" : " OK") << "\r\n"
+            << "Server: iouring_activity_server\r\n"
+            << "Content-Type: " << content_type << "\r\n"
+            << "Content-Length: " << content_length << "\r\n"
+            << "Access-Control-Allow-Origin: *\r\n"
+            << "Accept-Ranges: bytes\r\n";
+    if (partial) {
+        headers << "Content-Range: bytes " << start << '-' << end << '/' << file_size << "\r\n";
+    }
+    headers << "Connection: close\r\n\r\n";
+
+    if (req.method == "HEAD" || content_length == 0) {
+        SendRaw(headers.str());
+        DisconnectAfterFlush();
+        return;
+    }
+
+    const int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        SendHttp(404, "text/plain", "Not Found");
+        return;
+    }
+    if (::lseek(fd, static_cast<off_t>(start), SEEK_SET) < 0) {
+        ::close(fd);
+        SendHttp(404, "text/plain", "Not Found");
+        return;
+    }
+
+    file_stream_.fd.Reset(fd);
+    file_stream_.remaining_bytes = content_length;
+    file_stream_.active = true;
+
+    SendRaw(headers.str());
+    PumpFileStream();
+    DisconnectAfterFlush();
+}
+
+bool ActivitySession::PumpFileStream() {
+    if (!file_stream_.active) {
+        return true;
+    }
+    if (file_stream_.remaining_bytes == 0) {
+        ResetFileStream();
+        MaybeDisconnectAfterFlush();
+        return true;
+    }
+
+    for (std::uint32_t i = 0;
+         i < file_stream_.max_chunks_per_write && file_stream_.remaining_bytes > 0;
+         ++i) {
+        const auto next_size = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+            file_stream_.remaining_bytes, file_stream_.chunk_size));
+        auto buffer_result = Pool().Allocate(next_size);
+        if (!buffer_result) {
+            ResetFileStream();
+            Disconnect();
+            return false;
+        }
+
+        auto buffer = std::move(*buffer_result);
+        auto writable = buffer->Writable();
+        std::size_t total_read = 0;
+        while (total_read < next_size) {
+            const auto n = ::read(file_stream_.fd.Get(),
+                                  writable.data() + total_read,
+                                  next_size - total_read);
+            if (n > 0) {
+                total_read += static_cast<std::size_t>(n);
+                continue;
+            }
+            if (n == 0) {
+                break;
+            }
+            if (errno == EINTR) {
+                continue;
+            }
+            ResetFileStream();
+            Disconnect();
+            return false;
+        }
+
+        if (total_read == 0) {
+            ResetFileStream();
+            MaybeDisconnectAfterFlush();
+            return true;
+        }
+
+        buffer->Commit(static_cast<std::uint32_t>(total_read));
+        file_stream_.remaining_bytes -= total_read;
+        if (!Send(std::move(buffer)).has_value()) {
+            ResetFileStream();
+            return false;
+        }
+    }
+
+    if (file_stream_.remaining_bytes == 0) {
+        ResetFileStream();
+        MaybeDisconnectAfterFlush();
+    }
+    return true;
+}
+
+void ActivitySession::ResetFileStream() {
+    file_stream_.fd.Reset();
+    file_stream_.remaining_bytes = 0;
+    file_stream_.active = false;
 }
 
 void ActivitySession::SendHttp(int status, std::string_view content_type, std::string body) {
