@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Hls from 'hls.js'
-import { Film, Loader2, Maximize, Pause, Play, RotateCcw, Volume2, VolumeX } from 'lucide-vue-next'
+import { Film, Loader2, Maximize, Pause, Play, RotateCcw, SkipForward, Volume2, VolumeX } from 'lucide-vue-next'
 
 const props = defineProps({
     videoUrl: {
@@ -18,7 +18,7 @@ const props = defineProps({
     }
 })
 
-const emit = defineEmits(['toast', 'ended'])
+const emit = defineEmits(['toast', 'ended', 'skip'])
 
 const containerRef = ref(null)
 const videoRef = ref(null)
@@ -431,6 +431,11 @@ const toggleFullscreen = (e) => {
         document.exitFullscreen()
     }
 }
+
+const handleSkip = (e) => {
+    e?.stopPropagation()
+    emit('skip')
+}
 </script>
 
 <template>
@@ -464,13 +469,22 @@ const toggleFullscreen = (e) => {
 
         <div v-if="error" class="absolute inset-0 flex flex-col gap-4 items-center justify-center bg-black/80 z-20 text-white">
             <div>{{ error }}</div>
-            <button
-                class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                @click.stop="retryCount = 0; loadVideo(videoUrl)"
-            >
-                <RotateCcw class="inline-block w-4 h-4 mr-2" />
-                Retry
-            </button>
+            <div class="flex items-center gap-2">
+                <button
+                    class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                    @click.stop="retryCount = 0; loadVideo(videoUrl)"
+                >
+                    <RotateCcw class="inline-block w-4 h-4 mr-2" />
+                    Retry
+                </button>
+                <button
+                    class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                    @click.stop="handleSkip"
+                >
+                    <SkipForward class="inline-block w-4 h-4 mr-2" />
+                    Skip
+                </button>
+            </div>
         </div>
 
         <div
@@ -518,9 +532,18 @@ const toggleFullscreen = (e) => {
                         <button
                             @click="togglePlay"
                             class="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm hover:scale-110 active:scale-95 transition-all duration-200"
+                            title="Play/Pause"
                         >
                             <Pause v-if="isPlaying" :size="20" fill="currentColor" />
                             <Play v-else :size="20" fill="currentColor" class="ml-0.5" />
+                        </button>
+
+                        <button
+                            @click="handleSkip"
+                            class="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm hover:scale-110 active:scale-95 transition-all duration-200"
+                            title="Skip"
+                        >
+                            <SkipForward :size="20" />
                         </button>
 
                         <div class="flex items-center gap-2 group/vol">

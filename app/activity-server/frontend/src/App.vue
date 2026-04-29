@@ -178,6 +178,7 @@ const handlePlayerEnded = async () => {
                       :videoUrl="videoUrl"
                       :serverPlaybackState="serverPlaybackState"
                       @ended="handlePlayerEnded"
+                      @skip="handlePlayerEnded"
                    />
                </div>
                
