@@ -217,6 +217,66 @@ CommandResult CurlGetWithConfig(std::string_view url,
     return result;
 }
 
+struct HttpFetchResult {
+    int exit_code = -1;
+    int status = 0;
+    std::string body;
+};
+
+HttpFetchResult CurlGetWithConfigStatus(std::string_view url,
+                                        const std::vector<std::string>& headers) {
+    const auto config_path = std::filesystem::temp_directory_path() /
+        (RandomId("tving-curl-") + ".conf");
+    std::ostringstream config;
+    config << "silent\nshow-error\nlocation\nmax-time = 20\n";
+    config << "url = \"" << ReplaceAll(std::string(url), "\"", "\\\"") << "\"\n";
+    config << "write-out = \"\\n__CURL_HTTP_STATUS__:%{http_code}\"\n";
+    for (const auto& header : headers) {
+        config << "header = \"" << ReplaceAll(header, "\"", "\\\"") << "\"\n";
+    }
+
+    const auto config_text = config.str();
+    const int fd = ::open(config_path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) {
+        return {};
+    }
+    const auto* data = config_text.data();
+    std::size_t remaining = config_text.size();
+    while (remaining > 0) {
+        const auto written = ::write(fd, data, remaining);
+        if (written <= 0) {
+            ::close(fd);
+            std::error_code ec;
+            std::filesystem::remove(config_path, ec);
+            return {};
+        }
+        data += written;
+        remaining -= static_cast<std::size_t>(written);
+    }
+    ::close(fd);
+
+    const auto command = RunCommandCapture("curl --config " + ShellQuote(config_path.string()) +
+                                           " 2>/dev/null");
+    std::error_code ec;
+    std::filesystem::remove(config_path, ec);
+
+    HttpFetchResult result;
+    result.exit_code = command.exit_code;
+    result.body = command.output;
+    const std::string marker = "\n__CURL_HTTP_STATUS__:";
+    const auto marker_pos = result.body.rfind(marker);
+    if (marker_pos != std::string::npos) {
+        const auto status_text = result.body.substr(marker_pos + marker.size());
+        result.body.resize(marker_pos);
+        try {
+            result.status = std::stoi(status_text);
+        } catch (...) {
+            result.status = 0;
+        }
+    }
+    return result;
+}
+
 struct TvingPlaylist {
     std::string id;
     std::string media_code;
@@ -859,21 +919,41 @@ void ActivitySession::ProxyHls(const HttpRequest& req) {
         tving_headers.push_back("Range: " + range);
     }
 
-    const auto upstream = tving_headers.empty()
-        ? CurlGet(url)
-        : CurlGetWithConfig(url, tving_headers);
+    const auto content_type = media::ContentTypeForUrl(url);
+    if (!tving_headers.empty()) {
+        const auto upstream = CurlGetWithConfigStatus(url, tving_headers);
+        if (upstream.exit_code != 0 || upstream.status == 0) {
+            SendHttp(502, "application/json", "{\"detail\":\"Upstream request failed\"}");
+            return;
+        }
+        if (upstream.status >= 400) {
+            SendHttp(upstream.status, "application/json",
+                     "{\"detail\":\"TVING upstream rejected request\","
+                     "\"upstream_status\":" + std::to_string(upstream.status) +
+                     ",\"upstream_body\":\"" +
+                     JsonEscape(upstream.body.substr(0, 1200)) + "\"}");
+            return;
+        }
+        if (content_type == "application/vnd.apple.mpegurl" ||
+            upstream.body.starts_with("#EXTM3U")) {
+            SendHttp(200, "application/vnd.apple.mpegurl; charset=utf-8",
+                     RewriteHlsManifestWithTving(upstream.body, url, tving_id));
+            return;
+        }
+        SendHttp(200, content_type, upstream.body);
+        return;
+    }
+
+    const auto upstream = CurlGet(url);
     if (upstream.exit_code != 0) {
         SendHttp(502, "application/json", "{\"detail\":\"Upstream request failed\"}");
         return;
     }
 
-    const auto content_type = media::ContentTypeForUrl(url);
     if (content_type == "application/vnd.apple.mpegurl" ||
         upstream.output.starts_with("#EXTM3U")) {
         SendHttp(200, "application/vnd.apple.mpegurl; charset=utf-8",
-                 tving_id.empty()
-                     ? media::RewriteHlsManifest(upstream.output, url)
-                     : RewriteHlsManifestWithTving(upstream.output, url, tving_id));
+                 media::RewriteHlsManifest(upstream.output, url));
         return;
     }
     SendHttp(200, content_type, upstream.output);
