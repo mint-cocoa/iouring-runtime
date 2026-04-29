@@ -1066,9 +1066,13 @@ void ActivitySession::ProbeTving(std::string_view body) {
     }
 
     const auto urls = ExtractM3u8Urls(upstream.output);
+    const auto result_code = JsonString(upstream.output, "code").value_or("");
+    const auto result_message = JsonString(upstream.output, "message").value_or("");
     SendHttp(200, "application/json",
              "{\"status\":\"ok\","
              "\"media_code\":\"" + JsonEscape(media_code) + "\","
+             "\"result_code\":\"" + JsonEscape(result_code) + "\","
+             "\"result_message\":\"" + JsonEscape(result_message) + "\","
              "\"response_bytes\":" + std::to_string(upstream.output.size()) + ","
              "\"m3u8_count\":" + std::to_string(urls.size()) + ","
              "\"m3u8_urls\":" + JsonArray(urls) + ","
@@ -1112,6 +1116,16 @@ void ActivitySession::CookiePlayTving(std::string_view body) {
     if (upstream.exit_code != 0) {
         SendHttp(502, "application/json",
                  "{\"detail\":\"TVING stream info request failed\"}");
+        return;
+    }
+
+    const auto result_code = JsonString(upstream.output, "code").value_or("");
+    const auto result_message = JsonString(upstream.output, "message").value_or("");
+    if (!result_code.empty() && result_code != "000" && result_code != "200") {
+        SendHttp(403, "application/json",
+                 "{\"detail\":\"TVING stream info rejected playback\","
+                 "\"result_code\":\"" + JsonEscape(result_code) + "\","
+                 "\"result_message\":\"" + JsonEscape(result_message) + "\"}");
         return;
     }
 
