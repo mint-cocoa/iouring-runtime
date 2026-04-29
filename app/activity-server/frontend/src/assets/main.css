@@ -1,0 +1,197 @@
+@import "tailwindcss";
+
+:root {
+  --color-background: #0f0f13;
+  --color-text: #ffffff;
+
+  /* Glassmorphism Design Tokens */
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-bg-hover: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 255, 255, 0.12);
+  --glass-blur: 16px;
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  /* Brand Colors */
+  --accent-pink: rgba(230, 0, 103, 0.15);
+  --accent-purple: rgba(130, 87, 229, 0.12);
+  --accent-blue: rgba(26, 35, 126, 0.08);
+}
+
+/* Enhanced Mesh Gradient Background */
+body {
+  background-color: var(--color-background);
+  color: var(--color-text);
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+  position: relative;
+
+  /* Multi-layer mesh gradient - "유리가 돋보이는 무대" */
+  background:
+    radial-gradient(ellipse 80% 60% at 20% -10%, var(--accent-pink) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 50% at 85% 110%, var(--accent-purple) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 50% 50%, var(--accent-blue) 0%, transparent 60%),
+    var(--color-background);
+  background-attachment: fixed;
+}
+
+/* Noise Texture Overlay - 디지털의 차가움을 줄이고 유리 질감 강화 */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(0, 0, 0, 0.3) 100%);
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================
+   GLASSMORPHISM PANEL UTILITIES
+   ============================================ */
+
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--glass-shadow), var(--glass-inset);
+  transition: all 0.3s ease;
+}
+
+.glass-panel:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+}
+
+/* Stronger glass for overlays (Level 3) */
+.glass-panel-strong {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Subtle glass for headers */
+.glass-panel-subtle {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* ============================================
+   TEXT READABILITY ENHANCEMENTS
+   ============================================ */
+
+.glass-text {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.glass-text-strong {
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================
+   MICRO-ANIMATIONS
+   ============================================ */
+
+.glass-hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.glass-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.glass-hover-glow {
+  transition: box-shadow 0.3s ease;
+}
+
+.glass-hover-glow:hover {
+  box-shadow:
+    var(--glass-shadow),
+    0 0 20px rgba(130, 87, 229, 0.15);
+}
+
+/* ============================================
+   PERFORMANCE OPTIMIZATION
+   Reduce transparency/blur for users who prefer it
+   ============================================ */
+
+@media (prefers-reduced-transparency: reduce) {
+
+  body::before,
+  body::after {
+    display: none;
+  }
+
+  .glass-panel,
+  .glass-panel-strong,
+  .glass-panel-subtle {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(20, 20, 25, 0.95);
+  }
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .glass-hover-lift:hover {
+    transform: none;
+  }
+
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   CUSTOM SCROLLBAR
+   ============================================ */
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

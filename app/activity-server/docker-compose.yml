@@ -16,14 +16,6 @@ services:
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
     ports:
       - "8000:8000"
+      - "8080:8000"
     volumes:
       - /var/lib/iouring-runtime/activity-server/downloads:/var/lib/iouring-runtime/activity-server/downloads
-    networks:
-      youtube_backend_default:
-        aliases:
-          - backend
-
-networks:
-  youtube_backend_default:
-    external: true
-    name: youtube-backend_default

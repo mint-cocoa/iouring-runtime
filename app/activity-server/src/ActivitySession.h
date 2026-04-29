@@ -39,6 +39,7 @@ private:
     void AdvanceQueue(const std::string& instance_id);
     void RemoveQueue(std::string_view body);
     void ServeHls(const std::string& path);
+    bool ServeStaticFrontend(const HttpRequest& req);
     void ProxyThumbnail(const HttpRequest& req);
     void ProxyHls(const HttpRequest& req);
     void ExchangeDiscordToken(std::string_view body);

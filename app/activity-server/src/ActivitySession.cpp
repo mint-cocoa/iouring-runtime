@@ -25,6 +25,48 @@ std::mutex ActivitySession::sync_mu_;
 double ActivitySession::last_sync_time_ = 0.0;
 bool ActivitySession::last_sync_playing_ = true;
 
+namespace {
+
+bool IsBackendPrefix(std::string_view path) {
+    return path == "/api" || path.starts_with("/api/") ||
+           path == "/ws" ||
+           path == "/hls" || path.starts_with("/hls/") ||
+           path == "/files" || path.starts_with("/files/") ||
+           path == "/local" || path.starts_with("/local/") ||
+           path == "/proxy" || path.starts_with("/proxy/");
+}
+
+std::string StaticContentType(const std::filesystem::path& path) {
+    const auto ext = path.extension().string();
+    if (ext == ".html") return "text/html; charset=utf-8";
+    if (ext == ".css") return "text/css; charset=utf-8";
+    if (ext == ".js" || ext == ".mjs") return "application/javascript; charset=utf-8";
+    if (ext == ".json") return "application/json";
+    if (ext == ".svg") return "image/svg+xml";
+    if (ext == ".ico") return "image/x-icon";
+    if (ext == ".png") return "image/png";
+    if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+    if (ext == ".webp") return "image/webp";
+    if (ext == ".woff") return "font/woff";
+    if (ext == ".woff2") return "font/woff2";
+    if (ext == ".wasm") return "application/wasm";
+    if (ext == ".txt") return "text/plain; charset=utf-8";
+    return "application/octet-stream";
+}
+
+bool IsWithinRoot(const std::filesystem::path& root, const std::filesystem::path& target) {
+    auto root_it = root.begin();
+    auto target_it = target.begin();
+    for (; root_it != root.end(); ++root_it, ++target_it) {
+        if (target_it == target.end() || *root_it != *target_it) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 ActivitySession::ActivitySession(int fd, core::ring::IoRing& io_ring,
                                  core::buffer::BufferPool& pool,
                                  ActivityHub& hub)
@@ -204,6 +246,10 @@ void ActivitySession::HandleHttp(const HttpRequest& req) {
     }
     if (req.method == "GET" && req.path == "/healthz") {
         SendHttp(200, "application/json", "{\"status\":\"ok\",\"runtime\":\"cpp\"}");
+        return;
+    }
+    if ((req.method == "GET" || req.method == "HEAD") && !IsBackendPrefix(req.path) &&
+        ServeStaticFrontend(req)) {
         return;
     }
 
@@ -389,6 +435,37 @@ void ActivitySession::ServeHls(const std::string& path) {
     if (target.extension() == ".m3u8") type = "application/vnd.apple.mpegurl";
     if (target.extension() == ".ts") type = "video/mp2t";
     SendHttp(200, type, body);
+}
+
+bool ActivitySession::ServeStaticFrontend(const HttpRequest& req) {
+    const auto root = std::filesystem::weakly_canonical(std::filesystem::path(
+        EnvString("ACTIVITY_STATIC_DIR", "/usr/share/activity-server/frontend")));
+    if (!std::filesystem::is_directory(root)) {
+        return false;
+    }
+
+    auto rel = media::UrlDecode(req.path.empty() ? "/" : req.path);
+    if (!rel.empty() && rel.front() == '/') {
+        rel.erase(0, 1);
+    }
+
+    auto target = rel.empty() ? root / "index.html" : root / rel;
+    target = std::filesystem::weakly_canonical(target);
+    if (!IsWithinRoot(root, target)) {
+        SendHttp(404, "text/plain", "Not Found");
+        return true;
+    }
+
+    if (!std::filesystem::is_regular_file(target)) {
+        target = root / "index.html";
+    }
+    if (!std::filesystem::is_regular_file(target)) {
+        return false;
+    }
+
+    const auto body = req.method == "HEAD" ? std::string{} : ReadFile(target);
+    SendHttp(200, StaticContentType(target), body);
+    return true;
 }
 
 void ActivitySession::ProxyThumbnail(const HttpRequest& req) {
