@@ -44,6 +44,9 @@ private:
     void ProxyThumbnail(const HttpRequest& req);
     void ProxyHls(const HttpRequest& req);
     void ExchangeDiscordToken(std::string_view body);
+    void ProbeTving(std::string_view body);
+    void CookiePlayTving(std::string_view body);
+    void ServeTvingPlaylist(const HttpRequest& req);
 
     void SendHttp(int status, std::string_view content_type, std::string body);
     void SendFileResponse(const HttpRequest& req, const std::filesystem::path& path,

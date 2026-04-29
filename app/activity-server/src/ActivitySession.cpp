@@ -14,7 +14,10 @@
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
+#include <unordered_set>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -67,6 +70,307 @@ bool IsWithinRoot(const std::filesystem::path& root, const std::filesystem::path
         }
     }
     return true;
+}
+
+std::string ReplaceAll(std::string text, std::string_view from, std::string_view to) {
+    std::size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::string::npos) {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+    return text;
+}
+
+std::string CleanCookieText(std::string_view raw_cookie) {
+    std::istringstream in{std::string(raw_cookie)};
+    std::string line;
+    std::vector<std::string> parts;
+    while (std::getline(in, line)) {
+        line = Trim(line);
+        if (line.empty()) continue;
+        if (line.starts_with("#") && !line.starts_with("#HttpOnly_")) continue;
+        if (Lower(line).starts_with("cookie:")) {
+            line = Trim(std::string_view(line).substr(line.find(':') + 1));
+        }
+        if (line.find('\t') != std::string::npos) {
+            std::vector<std::string> columns;
+            std::istringstream tab_in(line);
+            std::string column;
+            while (std::getline(tab_in, column, '\t')) {
+                columns.push_back(column);
+            }
+            if (columns.size() >= 7) {
+                parts.push_back(columns[columns.size() - 2] + "=" + columns.back());
+            }
+            continue;
+        }
+        parts.push_back(line);
+    }
+
+    std::ostringstream out;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (i) out << "; ";
+        out << parts[i];
+    }
+    return out.str();
+}
+
+std::string CookieValue(std::string_view cookie, std::string_view key) {
+    while (!cookie.empty()) {
+        const auto semi = cookie.find(';');
+        auto part = Trim(cookie.substr(0, semi));
+        const auto eq = part.find('=');
+        if (eq != std::string::npos && part.substr(0, eq) == key) {
+            return iouring_runtime::media::UrlDecode(part.substr(eq + 1));
+        }
+        if (semi == std::string_view::npos) break;
+        cookie.remove_prefix(semi + 1);
+    }
+    return {};
+}
+
+std::vector<std::string> ExtractM3u8Urls(std::string text) {
+    text = ReplaceAll(std::move(text), "\\/", "/");
+    text = ReplaceAll(std::move(text), "\\u0026", "&");
+    text = ReplaceAll(std::move(text), "\\u003d", "=");
+    text = ReplaceAll(std::move(text), "\\u003D", "=");
+
+    std::vector<std::string> urls;
+    std::unordered_set<std::string> seen;
+    std::size_t pos = 0;
+    while (true) {
+        const auto http = text.find("http", pos);
+        if (http == std::string::npos) break;
+        if (text.compare(http, 8, "https://") != 0 &&
+            text.compare(http, 7, "http://") != 0) {
+            pos = http + 4;
+            continue;
+        }
+
+        auto end = http;
+        while (end < text.size()) {
+            const char ch = text[end];
+            if (ch == '"' || ch == '\'' || ch == '<' || ch == '>' ||
+                ch == '\\' || ch == '\r' || ch == '\n' || ch == ' ') {
+                break;
+            }
+            ++end;
+        }
+        auto url = text.substr(http, end - http);
+        while (!url.empty() && (url.back() == ',' || url.back() == ']' || url.back() == '}')) {
+            url.pop_back();
+        }
+        if (Lower(url).find(".m3u8") != std::string::npos && seen.insert(url).second) {
+            urls.push_back(std::move(url));
+        }
+        pos = end;
+    }
+    return urls;
+}
+
+std::string JsonArray(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    out << "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i) out << ",";
+        out << "\"" << JsonEscape(values[i]) << "\"";
+    }
+    out << "]";
+    return out.str();
+}
+
+CommandResult CurlGetWithConfig(std::string_view url,
+                                const std::vector<std::string>& headers) {
+    const auto config_path = std::filesystem::temp_directory_path() /
+        (RandomId("tving-curl-") + ".conf");
+    std::ostringstream config;
+    config << "silent\nshow-error\nlocation\nfail-with-body\nmax-time = 20\n";
+    config << "url = \"" << ReplaceAll(std::string(url), "\"", "\\\"") << "\"\n";
+    for (const auto& header : headers) {
+        config << "header = \"" << ReplaceAll(header, "\"", "\\\"") << "\"\n";
+    }
+
+    const auto config_text = config.str();
+    const int fd = ::open(config_path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) {
+        return {};
+    }
+    const auto* data = config_text.data();
+    std::size_t remaining = config_text.size();
+    while (remaining > 0) {
+        const auto written = ::write(fd, data, remaining);
+        if (written <= 0) {
+            ::close(fd);
+            std::error_code ec;
+            std::filesystem::remove(config_path, ec);
+            return {};
+        }
+        data += written;
+        remaining -= static_cast<std::size_t>(written);
+    }
+    ::close(fd);
+
+    const auto result = RunCommandCapture("curl --config " + ShellQuote(config_path.string()) +
+                                          " 2>/dev/null");
+    std::error_code ec;
+    std::filesystem::remove(config_path, ec);
+    return result;
+}
+
+struct TvingPlaylist {
+    std::string id;
+    std::string media_code;
+    std::string manifest;
+    std::string video_url;
+    std::string audio_url;
+    std::vector<std::string> headers;
+    std::chrono::steady_clock::time_point created_at;
+};
+
+std::mutex g_tving_mu;
+std::unordered_map<std::string, TvingPlaylist> g_tving_playlists;
+
+std::string BuildTvingStreamInfoUrl(std::string_view media_code) {
+    return "https://api.tving.com/v2/media/stream/info"
+        "?screenCode=CSSD0100"
+        "&networkCode=CSND0900"
+        "&osCode=CSOD0900"
+        "&teleCode=CSCD0900"
+        "&apiKey=1e7952d0917d6aab1f0293a063697610"
+        "&mediaCode=" + media::UrlEncode(media_code) +
+        "&info=Y"
+        "&callingFrom=HTML5"
+        "&adReq=adproxy"
+        "&uuid=2410204104-300a362f"
+        "&deviceInfo=PC"
+        "&noCache=" + std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+std::vector<std::string> BuildTvingHeaders(const std::string& cookie,
+                                           const std::string& token,
+                                           const std::string& auth_token,
+                                           const std::string& access_token) {
+    std::vector<std::string> headers = {
+        "Accept: application/json, text/plain, */*",
+        "Accept-Language: ko,en;q=0.9",
+        "Origin: https://www.tving.com",
+        "Referer: https://www.tving.com/",
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+        "Authorization: Bearer " + token,
+        "Cookie: " + cookie,
+    };
+    if (!auth_token.empty()) {
+        headers.push_back("Auth-Token: " + auth_token);
+    }
+    if (!access_token.empty()) {
+        headers.push_back("Access-Token: " + access_token);
+    }
+    return headers;
+}
+
+std::string ChooseTvingVideoUrl(const std::vector<std::string>& urls) {
+    for (const auto& url : urls) {
+        const auto lower = Lower(url);
+        if (lower.find("audio") == std::string::npos &&
+            lower.find("kbo2026audio") == std::string::npos) {
+            return url;
+        }
+    }
+    return urls.empty() ? std::string{} : urls.front();
+}
+
+std::string ChooseTvingAudioUrl(const std::vector<std::string>& urls) {
+    for (const auto& url : urls) {
+        const auto lower = Lower(url);
+        if (lower.find("audio") != std::string::npos ||
+            lower.find("kbo2026audio") != std::string::npos) {
+            return url;
+        }
+    }
+    return {};
+}
+
+std::string TvingProxyUrl(std::string_view remote_url, std::string_view tving_id) {
+    return "/proxy/hls?url=" + media::UrlEncode(remote_url) +
+           "&tving_id=" + media::UrlEncode(tving_id);
+}
+
+std::string BuildTvingMasterPlaylist(std::string_view video_url,
+                                     std::string_view audio_url,
+                                     std::string_view tving_id) {
+    std::ostringstream out;
+    out << "#EXTM3U\n"
+        << "#EXT-X-VERSION:7\n"
+        << "#EXT-X-INDEPENDENT-SEGMENTS\n";
+    std::string codecs = "avc1.640028";
+    if (!audio_url.empty()) {
+        codecs = "avc1.640028,mp4a.40.2";
+        out << "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"tving-audio\",NAME=\"TVING\","
+            << "DEFAULT=YES,AUTOSELECT=YES,URI=\""
+            << TvingProxyUrl(audio_url, tving_id) << "\"\n";
+    }
+    out << "#EXT-X-STREAM-INF:BANDWIDTH=6000000,AVERAGE-BANDWIDTH=4500000,"
+        << "CODECS=\"" << codecs << "\"";
+    if (!audio_url.empty()) {
+        out << ",AUDIO=\"tving-audio\"";
+    }
+    out << "\n" << TvingProxyUrl(video_url, tving_id) << "\n";
+    return out.str();
+}
+
+std::string RewriteHlsManifestWithTving(std::string_view text,
+                                        std::string_view base_url,
+                                        std::string_view tving_id) {
+    std::istringstream in{std::string(text)};
+    std::ostringstream out;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            out << "\n";
+            continue;
+        }
+        if (line.starts_with("#")) {
+            std::string rewritten = line;
+            std::size_t pos = 0;
+            while ((pos = rewritten.find("URI=\"", pos)) != std::string::npos) {
+                const auto start = pos + 5;
+                const auto end = rewritten.find('"', start);
+                if (end == std::string::npos) break;
+                const auto uri = rewritten.substr(start, end - start);
+                if (!uri.empty() && !uri.starts_with("data:")) {
+                    const auto resolved = media::ResolveUrl(base_url, uri);
+                    const auto proxied = TvingProxyUrl(resolved, tving_id);
+                    rewritten.replace(start, end - start, proxied);
+                    pos = start + proxied.size();
+                } else {
+                    pos = end + 1;
+                }
+            }
+            out << rewritten << "\n";
+            continue;
+        }
+        out << TvingProxyUrl(media::ResolveUrl(base_url, line), tving_id) << "\n";
+    }
+    return out.str();
+}
+
+std::optional<TvingPlaylist> GetTvingPlaylist(std::string_view tving_id) {
+    std::lock_guard lock(g_tving_mu);
+    auto it = g_tving_playlists.find(std::string(tving_id));
+    if (it == g_tving_playlists.end()) {
+        return std::nullopt;
+    }
+    if (std::chrono::steady_clock::now() - it->second.created_at > std::chrono::hours{6}) {
+        g_tving_playlists.erase(it);
+        return std::nullopt;
+    }
+    return it->second;
 }
 
 } // namespace
@@ -220,6 +524,19 @@ void ActivitySession::HandleHttp(const HttpRequest& req) {
     }
     if (req.method == "POST" && req.path == "/api/discord/token") {
         ExchangeDiscordToken(req.body);
+        return;
+    }
+    if (req.method == "POST" && req.path == "/api/tving/probe") {
+        ProbeTving(req.body);
+        return;
+    }
+    if (req.method == "POST" && req.path == "/api/tving/cookie-play") {
+        CookiePlayTving(req.body);
+        return;
+    }
+    if ((req.method == "GET" || req.method == "HEAD") &&
+        req.path.rfind("/api/tving/playlist/", 0) == 0) {
+        ServeTvingPlaylist(req);
         return;
     }
     if (req.method == "GET" && req.path.rfind("/api/download/status/", 0) == 0) {
@@ -513,6 +830,7 @@ void ActivitySession::ProxyThumbnail(const HttpRequest& req) {
 
 void ActivitySession::ProxyHls(const HttpRequest& req) {
     const auto url = QueryParam(req.query, "url");
+    const auto tving_id = QueryParam(req.query, "tving_id");
     if (url.empty()) {
         SendHttp(400, "application/json", "{\"detail\":\"url is required\"}");
         return;
@@ -527,12 +845,23 @@ void ActivitySession::ProxyHls(const HttpRequest& req) {
         return;
     }
 
-    std::string extra_args;
+    std::vector<std::string> tving_headers;
+    if (!tving_id.empty()) {
+        auto playlist = GetTvingPlaylist(tving_id);
+        if (!playlist) {
+            SendHttp(404, "application/json",
+                     "{\"detail\":\"TVING playlist not found or expired\"}");
+            return;
+        }
+        tving_headers = playlist->headers;
+    }
     if (const auto range = Header(req, "range"); !range.empty()) {
-        extra_args += "-H " + ShellQuote("Range: " + range);
+        tving_headers.push_back("Range: " + range);
     }
 
-    const auto upstream = CurlGet(url, extra_args);
+    const auto upstream = tving_headers.empty()
+        ? CurlGet(url)
+        : CurlGetWithConfig(url, tving_headers);
     if (upstream.exit_code != 0) {
         SendHttp(502, "application/json", "{\"detail\":\"Upstream request failed\"}");
         return;
@@ -542,7 +871,9 @@ void ActivitySession::ProxyHls(const HttpRequest& req) {
     if (content_type == "application/vnd.apple.mpegurl" ||
         upstream.output.starts_with("#EXTM3U")) {
         SendHttp(200, "application/vnd.apple.mpegurl; charset=utf-8",
-                 media::RewriteHlsManifest(upstream.output, url));
+                 tving_id.empty()
+                     ? media::RewriteHlsManifest(upstream.output, url)
+                     : RewriteHlsManifestWithTving(upstream.output, url, tving_id));
         return;
     }
     SendHttp(200, content_type, upstream.output);
@@ -579,6 +910,202 @@ void ActivitySession::ExchangeDiscordToken(std::string_view body) {
         return;
     }
     SendHttp(200, "application/json", upstream.output);
+}
+
+void ActivitySession::ProbeTving(std::string_view body) {
+    auto cookie = JsonString(body, "cookie_text").value_or("");
+    if (cookie.empty()) {
+        cookie = JsonString(body, "cookie").value_or("");
+    }
+    const auto media_code = JsonString(body, "media_code").value_or("C51850");
+    if (cookie.empty()) {
+        SendHttp(400, "application/json",
+                 "{\"detail\":\"cookie_text is required\"}");
+        return;
+    }
+
+    cookie = CleanCookieText(cookie);
+    if (cookie.size() > 1024 * 1024) {
+        SendHttp(400, "application/json",
+                 "{\"detail\":\"cookie_text is too large\"}");
+        return;
+    }
+
+    const auto token = CookieValue(cookie, "_tving_token");
+    const auto auth_token = CookieValue(cookie, "authToken");
+    const auto access_token = CookieValue(cookie, "accessToken");
+    if (token.empty()) {
+        SendHttp(400, "application/json",
+                 "{\"detail\":\"cookie_text must contain _tving_token\"}");
+        return;
+    }
+
+    const std::string stream_info_url =
+        "https://api.tving.com/v2/media/stream/info"
+        "?screenCode=CSSD0100"
+        "&networkCode=CSND0900"
+        "&osCode=CSOD0900"
+        "&teleCode=CSCD0900"
+        "&apiKey=1e7952d0917d6aab1f0293a063697610"
+        "&mediaCode=" + media::UrlEncode(media_code) +
+        "&info=Y"
+        "&callingFrom=HTML5"
+        "&adReq=adproxy"
+        "&uuid=2410204104-300a362f"
+        "&deviceInfo=PC"
+        "&noCache=" + std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+
+    std::vector<std::string> headers = {
+        "Accept: application/json, text/plain, */*",
+        "Accept-Language: ko,en;q=0.9",
+        "Origin: https://www.tving.com",
+        "Referer: https://www.tving.com/",
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+        "Authorization: Bearer " + token,
+        "Cookie: " + cookie,
+    };
+    if (!auth_token.empty()) {
+        headers.push_back("Auth-Token: " + auth_token);
+    }
+    if (!access_token.empty()) {
+        headers.push_back("Access-Token: " + access_token);
+    }
+
+    const auto upstream = CurlGetWithConfig(stream_info_url, headers);
+    if (upstream.exit_code != 0) {
+        SendHttp(502, "application/json",
+                 "{\"detail\":\"TVING stream info request failed\","
+                 "\"cookie_keys\":{\"_tving_token\":true,\"authToken\":" +
+                 std::string(auth_token.empty() ? "false" : "true") +
+                 ",\"accessToken\":" +
+                 std::string(access_token.empty() ? "false" : "true") + "}}");
+        return;
+    }
+
+    const auto urls = ExtractM3u8Urls(upstream.output);
+    SendHttp(200, "application/json",
+             "{\"status\":\"ok\","
+             "\"media_code\":\"" + JsonEscape(media_code) + "\","
+             "\"response_bytes\":" + std::to_string(upstream.output.size()) + ","
+             "\"m3u8_count\":" + std::to_string(urls.size()) + ","
+             "\"m3u8_urls\":" + JsonArray(urls) + ","
+             "\"cookie_keys\":{\"_tving_token\":true,\"authToken\":" +
+             std::string(auth_token.empty() ? "false" : "true") +
+             ",\"accessToken\":" +
+             std::string(access_token.empty() ? "false" : "true") + "}}");
+}
+
+void ActivitySession::CookiePlayTving(std::string_view body) {
+    auto cookie = JsonString(body, "cookie_text").value_or("");
+    if (cookie.empty()) {
+        cookie = JsonString(body, "cookie").value_or("");
+    }
+    const auto media_code = JsonString(body, "media_code").value_or("C51850");
+    const auto instance_id = JsonString(body, "instance_id").value_or("default");
+    if (cookie.empty()) {
+        SendHttp(400, "application/json",
+                 "{\"detail\":\"cookie_text is required\"}");
+        return;
+    }
+
+    cookie = CleanCookieText(cookie);
+    if (cookie.size() > 1024 * 1024) {
+        SendHttp(400, "application/json",
+                 "{\"detail\":\"cookie_text is too large\"}");
+        return;
+    }
+
+    const auto token = CookieValue(cookie, "_tving_token");
+    const auto auth_token = CookieValue(cookie, "authToken");
+    const auto access_token = CookieValue(cookie, "accessToken");
+    if (token.empty()) {
+        SendHttp(400, "application/json",
+                 "{\"detail\":\"cookie_text must contain _tving_token\"}");
+        return;
+    }
+
+    auto headers = BuildTvingHeaders(cookie, token, auth_token, access_token);
+    const auto upstream = CurlGetWithConfig(BuildTvingStreamInfoUrl(media_code), headers);
+    if (upstream.exit_code != 0) {
+        SendHttp(502, "application/json",
+                 "{\"detail\":\"TVING stream info request failed\"}");
+        return;
+    }
+
+    const auto urls = ExtractM3u8Urls(upstream.output);
+    const auto video_url = ChooseTvingVideoUrl(urls);
+    const auto audio_url = ChooseTvingAudioUrl(urls);
+    if (video_url.empty()) {
+        SendHttp(502, "application/json",
+                 "{\"detail\":\"TVING response did not contain a usable video m3u8\","
+                 "\"m3u8_count\":" + std::to_string(urls.size()) + ","
+                 "\"m3u8_urls\":" + JsonArray(urls) + "}");
+        return;
+    }
+
+    TvingPlaylist playlist;
+    playlist.id = RandomId("tving_");
+    playlist.media_code = media_code;
+    playlist.video_url = video_url;
+    playlist.audio_url = audio_url;
+    playlist.headers = std::move(headers);
+    playlist.created_at = std::chrono::steady_clock::now();
+    playlist.manifest = BuildTvingMasterPlaylist(
+        playlist.video_url, playlist.audio_url, playlist.id);
+
+    QueueEntry entry;
+    entry.id = "tving_" + playlist.id;
+    entry.url = "/api/tving/playlist/" + playlist.id + ".m3u8";
+    entry.source = "tving";
+    entry.title = "TVING " + media_code;
+    entry.ext = "m3u8";
+
+    {
+        std::lock_guard lock(g_tving_mu);
+        g_tving_playlists[playlist.id] = playlist;
+    }
+
+    {
+        std::lock_guard lock(hub_.mu_);
+        auto& state = hub_.StateLocked(instance_id.empty() ? "default" : instance_id);
+        state.current_video_url = entry.url;
+        state.metadata = entry;
+        state.is_playing = true;
+        state.current_time = 0.0;
+        state.start_at = std::chrono::steady_clock::now();
+    }
+
+    hub_.BroadcastState(instance_id.empty() ? "default" : instance_id);
+    SendHttp(200, "application/json",
+             "{\"status\":\"success\","
+             "\"entry\":" + hub_.EntryJson(entry) + ","
+             "\"autostart\":true,"
+             "\"playlist\":{\"id\":\"" + JsonEscape(playlist.id) + "\","
+             "\"url\":\"" + JsonEscape(entry.url) + "\","
+             "\"has_audio\":" + std::string(audio_url.empty() ? "false" : "true") + ","
+             "\"video_url\":\"" + JsonEscape(video_url) + "\","
+             "\"audio_url\":\"" + JsonEscape(audio_url) + "\","
+             "\"m3u8_count\":" + std::to_string(urls.size()) + ","
+             "\"m3u8_urls\":" + JsonArray(urls) + "}}");
+}
+
+void ActivitySession::ServeTvingPlaylist(const HttpRequest& req) {
+    const std::string prefix = "/api/tving/playlist/";
+    auto id = req.path.substr(prefix.size());
+    if (id.ends_with(".m3u8")) {
+        id.resize(id.size() - std::string(".m3u8").size());
+    }
+    const auto playlist = GetTvingPlaylist(id);
+    if (!playlist) {
+        SendHttp(404, "application/json",
+                 "{\"detail\":\"TVING playlist not found or expired\"}");
+        return;
+    }
+    SendHttp(200, "application/vnd.apple.mpegurl; charset=utf-8",
+             req.method == "HEAD" ? std::string{} : playlist->manifest);
 }
 
 void ActivitySession::SendFileResponse(const HttpRequest& req, const std::filesystem::path& path,

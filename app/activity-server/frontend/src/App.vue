@@ -7,7 +7,7 @@ import QueueList from './components/playlist/QueueList.vue'
 import { useCocoaSocket } from './composables/useCocoaSocket'
 import { fetchWithNgrok } from './api/fetch'
 
-import { MessageSquare, Send, X } from 'lucide-vue-next'
+import { Loader2, MessageSquare, Radio, Send, Upload, X } from 'lucide-vue-next'
 
 const getAnonymousName = () => {
     const key = 'cocoa_chat_name'
@@ -21,6 +21,10 @@ const getAnonymousName = () => {
 
 // -- Setup --
 const urlInput = ref('')
+const tvingMediaCode = ref('C51850')
+const tvingCookieText = ref('')
+const tvingCookieFileName = ref('')
+const tvingLoading = ref(false)
 const chatInput = ref('')
 const chatScrollRef = ref(null)
 const chatName = ref(getAnonymousName())
@@ -98,6 +102,44 @@ const handleDownload = async () => {
         urlInput.value = ''
     } catch (err) {
         console.error('Enqueue failed', err)
+    }
+}
+
+const handleTvingCookieFile = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    tvingCookieFileName.value = file.name
+    tvingCookieText.value = await file.text()
+}
+
+const handleTvingPlay = async () => {
+    const cookieText = tvingCookieText.value.trim()
+    const mediaCode = tvingMediaCode.value.trim() || 'C51850'
+    if (!cookieText || tvingLoading.value) return
+
+    tvingLoading.value = true
+    try {
+        const response = await fetchWithNgrok('/api/tving/cookie-play', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cookie_text: cookieText,
+                media_code: mediaCode,
+                instance_id: instanceId.value
+            })
+        })
+        if (!response.ok) {
+            const text = await response.text()
+            throw new Error(text || `TVING request failed: ${response.status}`)
+        }
+        tvingCookieText.value = ''
+        tvingCookieFileName.value = ''
+    } catch (err) {
+        console.error('TVING play failed', err)
+        showToast('TVING play failed', 'error')
+    } finally {
+        tvingLoading.value = false
     }
 }
 
@@ -241,7 +283,45 @@ const handlePlayerEnded = async () => {
                 </div>
                 
                 <!-- Input Area - Glass style -->
-                <div class="p-4 border-t border-white/10 bg-gradient-to-t from-black/40 to-transparent backdrop-blur-sm z-10"> 
+                <div class="p-4 border-t border-white/10 bg-gradient-to-t from-black/40 to-transparent backdrop-blur-sm z-10 space-y-3">
+                    <div class="grid grid-cols-[1fr_auto] gap-2">
+                        <input
+                            v-model="tvingMediaCode"
+                            type="text"
+                            placeholder="TVING code"
+                            class="min-w-0 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-sky-400/50 focus:bg-white/10 transition-all text-white placeholder-white/30"
+                        />
+                        <label
+                            class="h-9 w-9 inline-flex items-center justify-center bg-white/10 hover:bg-white/15 text-white rounded-lg transition-all cursor-pointer"
+                            title="Upload cookie.txt"
+                        >
+                            <Upload class="w-4 h-4" />
+                            <input
+                                type="file"
+                                accept=".txt,text/plain"
+                                class="hidden"
+                                @change="handleTvingCookieFile"
+                            />
+                        </label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button
+                            @click="handleTvingPlay"
+                            class="h-9 flex-1 inline-flex items-center justify-center gap-2 bg-sky-500/15 hover:bg-sky-500/25 disabled:opacity-40 disabled:hover:bg-sky-500/15 text-sky-100 border border-sky-400/20 rounded-lg px-3 text-xs font-semibold transition-all"
+                            :disabled="!tvingCookieText.trim() || tvingLoading"
+                        >
+                            <Loader2 v-if="tvingLoading" class="w-4 h-4 animate-spin" />
+                            <Radio v-else class="w-4 h-4" />
+                            TVING
+                        </button>
+                        <div
+                            class="min-w-0 flex-1 text-[11px] text-white/35 truncate"
+                            :title="tvingCookieFileName"
+                        >
+                            {{ tvingCookieFileName || 'cookie.txt' }}
+                        </div>
+                    </div>
+
                     <div class="relative group">
                         <input 
                             v-model="urlInput"
