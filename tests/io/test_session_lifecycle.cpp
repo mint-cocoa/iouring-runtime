@@ -1,5 +1,6 @@
 #include <iouring_runtime/core/Session.h>
 #include <iouring_runtime/core/IoRing.h>
+#include <iouring_runtime/core/PausedRecvQueue.h>
 
 #include <gtest/gtest.h>
 
@@ -200,6 +201,35 @@ TEST_F(SessionLifecycleTest, PauseRecvBeforeStartDefersReadsUntilResume) {
 
     ::close(remote_fd);
     DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
+}
+
+TEST(PausedRecvQueueTest, PreservesChunksAndTracksLimit) {
+    PausedRecvQueue queue(80 * 1024);
+    std::vector<std::byte> first(48 * 1024, std::byte{'A'});
+    std::vector<std::byte> second(32 * 1024, std::byte{'B'});
+    std::vector<std::byte> overflow(1, std::byte{'C'});
+
+    EXPECT_TRUE(queue.Push(first));
+    EXPECT_TRUE(queue.Push(second));
+    EXPECT_FALSE(queue.Push(overflow));
+
+    auto stats = queue.Snapshot();
+    EXPECT_EQ(stats.current_bytes, 80u * 1024u);
+    EXPECT_EQ(stats.peak_bytes, 80u * 1024u);
+    EXPECT_EQ(stats.events, 2u);
+    EXPECT_EQ(stats.overflow_count, 1u);
+    EXPECT_EQ(stats.dropped_bytes, 1u);
+
+    auto out = queue.Pop();
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(out->data.size(), first.size());
+    EXPECT_EQ(out->data.front(), std::byte{'A'});
+
+    out = queue.Pop();
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(out->data.size(), second.size());
+    EXPECT_EQ(out->data.front(), std::byte{'B'});
+    EXPECT_TRUE(queue.Empty());
 }
 
 // Send data, then peer closes. Both send CQE and recv EOF must settle

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <iouring_runtime/core/RecvBuffer.h>
+#include <iouring_runtime/core/PausedRecvQueue.h>
 #include <iouring_runtime/core/SendBuffer.h>
 #include <iouring_runtime/core/SendQueue.h>
 #include <iouring_runtime/core/SocketHandle.h>
@@ -144,7 +144,7 @@ public:
 protected:
     // Subclass implements packet-level processing.
     // Fast path: called with provided buffer data (zero-copy, in-place).
-    // Slow path: called with RecvBuffer data after reassembly.
+    // Slow path: called with queued data that arrived while recv was paused.
     virtual void OnRecv(std::span<const std::byte> data) = 0;
     virtual void OnConnected() {}
     virtual void OnDisconnected() {}
@@ -185,7 +185,7 @@ private:
     IoRing& ring_;
     BufferPool& pool_;
     buffer::SendQueue send_queue_;
-    buffer::RecvBuffer recv_buf_;
+    buffer::PausedRecvQueue paused_recv_;
     iouring_runtime::core::SessionId session_id_ = 0;
     ConnectedCallback on_connected_;
     DisconnectCallback on_disconnect_;

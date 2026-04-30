@@ -230,7 +230,7 @@ void Session::OnRecv(ring::RecvEvent&,
 
     // Always return provided buffer to the ring, even during disconnect.
     // Failing to return leaks buffers from the provided buffer pool.
-    bool pause_buffer_overflow = false;
+    bool paused_recv_overflow = false;
     if (has_buffer) {
         std::uint16_t buf_id = flags >> IORING_CQE_BUFFER_SHIFT;
         auto& buf_ring = ring_.BufRing();
@@ -239,7 +239,7 @@ void Session::OnRecv(ring::RecvEvent&,
             last_activity_ = std::chrono::steady_clock::now();
             auto view = buf_ring.View(buf_id, static_cast<std::uint32_t>(res));
             if (recv_paused_) {
-                pause_buffer_overflow = !recv_buf_.Append(view).has_value();
+                paused_recv_overflow = !paused_recv_.Push(view);
             } else {
                 OnRecv(view);
             }
@@ -248,7 +248,7 @@ void Session::OnRecv(ring::RecvEvent&,
         buf_ring.Return(buf_id);
     }
 
-    if (pause_buffer_overflow) {
+    if (paused_recv_overflow) {
         obs::LogError(kLogCategory,
                       "Session[fd={}]: [DISC:PAUSED_RECV_OVERFLOW] paused recv buffer overflow",
                       Fd());
@@ -359,15 +359,17 @@ bool Session::DisconnectIfBackpressureExpired(
 }
 
 bool Session::FlushPausedRecvBuffer() {
-    if (recv_buf_.IsEmpty()) {
+    if (paused_recv_.Empty()) {
         return true;
     }
 
-    auto pending = recv_buf_.ReadRegion();
-    OnRecv(pending);
-    recv_buf_.OnRead(static_cast<std::uint32_t>(pending.size()));
-    if (recv_buf_.ShouldCompact()) {
-        recv_buf_.Compact();
+    while (!paused_recv_.Empty() && !disconnecting_) {
+        auto pending = paused_recv_.Pop();
+        if (!pending) {
+            break;
+        }
+        OnRecv(std::span<const std::byte>(
+            pending->data.data(), pending->data.size()));
     }
     return !disconnecting_;
 }
