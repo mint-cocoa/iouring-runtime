@@ -75,6 +75,9 @@ public:
                            HttpStatus status = HttpStatus::kFound);
 
     core::buffer::SendBufferRef Build(core::buffer::BufferPool& pool) const;
+    std::vector<core::buffer::SendBufferRef> BuildBuffers(
+        core::buffer::BufferPool& pool,
+        std::uint32_t body_chunk_size = 256 * 1024) const;
     void Send();
     bool SendFile(std::string path,
                   std::string_view content_type = "application/octet-stream",

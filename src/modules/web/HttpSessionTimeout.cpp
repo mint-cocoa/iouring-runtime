@@ -24,7 +24,7 @@ void HttpSession::EndDeferredResponse() {
 }
 
 bool HttpSession::HasPendingAppWork() const {
-    return async_work_count_ != 0;
+    return async_work_count_ != 0 || file_stream_.active || body_stream_.active;
 }
 
 bool HttpSession::StartOrFailRequestDeadline() {

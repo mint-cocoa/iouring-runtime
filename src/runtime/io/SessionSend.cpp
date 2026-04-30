@@ -46,7 +46,13 @@ void Session::OnSend(ring::SendEvent&, std::int32_t res) {
     }
 
     if (res < 0) {
-        obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SEND_ERR] send error res={}", Fd(), res);
+        if (IsExpectedDisconnectResult(res)) {
+            obs::LogDebug(kLogCategory, "Session[fd={}]: [DISC:{}] send closed res={}",
+                          Fd(), DisconnectReasonForResult(res), res);
+        } else {
+            obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SEND_ERR] send error res={}",
+                          Fd(), res);
+        }
         in_flight_bufs_.clear();
         send_iovecs_.clear();
         Disconnect();
@@ -113,10 +119,15 @@ void Session::UpdateBackpressureState(std::size_t depth_hint,
 
     if (!backpressure_active_ && (depth_high || bytes_high)) {
         backpressure_active_ = true;
+        backpressure_active_since_ = std::chrono::steady_clock::now();
+        if (pause_recv_on_backpressure_) {
+            PauseRecv();
+        }
         if (on_backpressure_) {
             on_backpressure_(std::static_pointer_cast<Session>(shared_from_this()), true);
         }
-        if (disconnect_on_high_watermark_ && !disconnecting_) {
+        if (disconnect_on_high_watermark_ && !disconnecting_ &&
+            backpressure_disconnect_delay_.count() == 0) {
             obs::LogWarn(kLogCategory,
                          "Session[fd={}]: [DISC:SLOW_CLIENT] send queue pressure depth={} bytes={}",
                          Fd(), stats.current_depth, stats.pending_bytes);
@@ -127,6 +138,10 @@ void Session::UpdateBackpressureState(std::size_t depth_hint,
 
     if (backpressure_active_ && depth_low && bytes_low) {
         backpressure_active_ = false;
+        backpressure_active_since_ = {};
+        if (pause_recv_on_backpressure_) {
+            ResumeRecv();
+        }
         if (on_backpressure_) {
             on_backpressure_(std::static_pointer_cast<Session>(shared_from_this()), false);
         }

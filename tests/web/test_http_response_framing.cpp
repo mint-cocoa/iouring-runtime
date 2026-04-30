@@ -4,6 +4,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace iouring_runtime::web;
 using iouring_runtime::core::buffer::BufferPool;
@@ -17,6 +18,16 @@ std::string Serialize(const HttpResponse& response, BufferPool& pool) {
     }
     const auto data = buffer->Data();
     return std::string(reinterpret_cast<const char*>(data.data()), data.size());
+}
+
+std::string SerializeBuffers(
+    const std::vector<iouring_runtime::core::buffer::SendBufferRef>& buffers) {
+    std::string out;
+    for (const auto& buffer : buffers) {
+        const auto data = buffer->Data();
+        out.append(reinterpret_cast<const char*>(data.data()), data.size());
+    }
+    return out;
 }
 
 bool LineStartsWith(std::string_view line, std::string_view name) {
@@ -169,6 +180,26 @@ TEST_F(FramingFixture, TextSetsPlainTextContentType) {
 
     EXPECT_EQ(FirstHeaderValue(out, "Content-Type"), "text/plain");
     EXPECT_EQ(BodyBytes(out), "hello text");
+}
+
+TEST_F(FramingFixture, LargeBodyCanBuildAsHeaderAndBodyChunks) {
+    const std::string body(1500, 'x');
+    HttpResponse response;
+    response.ContentType("text/plain").Body(body);
+
+    BufferPool single_buffer_pool(512, 4);
+    EXPECT_FALSE(response.Build(single_buffer_pool));
+
+    BufferPool chunked_pool(512, 16);
+    const auto buffers = response.BuildBuffers(chunked_pool, 128);
+    ASSERT_FALSE(buffers.empty());
+    ASSERT_GT(buffers.size(), 2u);
+
+    const auto out = SerializeBuffers(buffers);
+    EXPECT_EQ(FirstHeaderValue(out, "Content-Length"), std::to_string(body.size()));
+    EXPECT_EQ(FirstHeaderValue(out, "Content-Type"), "text/plain");
+    EXPECT_EQ(BodyBytes(out), body);
+    EXPECT_EQ(response.LastBuiltBytes(), out.size());
 }
 
 TEST_F(FramingFixture, ErrorSetsStatusPlainTextAndBody) {

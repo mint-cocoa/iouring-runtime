@@ -18,6 +18,13 @@ void ConfigureProxySession(const core::io::SessionRef& session,
     session->SetBackpressureWatermarks(
         config.backpressure.send_queue_high_watermark,
         config.backpressure.send_queue_low_watermark);
+    session->SetBackpressureByteWatermarks(
+        config.backpressure.send_queue_high_bytes,
+        config.backpressure.send_queue_low_bytes);
+    session->SetPauseRecvOnBackpressure(
+        config.backpressure.pause_recv_on_high_watermark);
+    session->SetBackpressureDisconnectDelay(
+        config.backpressure.disconnect_after);
     session->SetDisconnectOnHighWatermark(
         config.backpressure.disconnect_on_high_watermark);
 }

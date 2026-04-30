@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <memory>
@@ -377,6 +378,43 @@ TEST_F(SessionLifecycleTest, BackpressureWatermarkTransitions) {
 
     ASSERT_EQ(transitions.size(), 2u);
     EXPECT_FALSE(transitions.back());
+
+    ::close(remote_fd);
+}
+
+TEST_F(SessionLifecycleTest, BackpressureCanPauseAndResumeOwnRecv) {
+    auto [local_fd, remote_fd] = MakeSocketPair();
+
+    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_, 8);
+    sess->SetBackpressureWatermarks(1, 0);
+    sess->SetPauseRecvOnBackpressure(true);
+    sess->Start();
+
+    auto buf_result = pool_.Allocate(2 * 1024 * 1024);
+    ASSERT_TRUE(buf_result.has_value());
+    auto buf = std::move(*buf_result);
+    std::memset(buf->Writable().data(), 0xAB, 2 * 1024 * 1024);
+    buf->Commit(2 * 1024 * 1024);
+    ASSERT_TRUE(sess->Send(std::move(buf)).has_value());
+    EXPECT_TRUE(sess->BackpressureActive());
+
+    ring_->Dispatch(std::chrono::milliseconds{20});
+    ASSERT_TRUE(sess->BackpressureActive());
+
+    ASSERT_EQ(::send(remote_fd, "paused", 6, MSG_NOSIGNAL), 6);
+    ring_->Dispatch(std::chrono::milliseconds{20});
+    EXPECT_EQ(sess->recv_count.load(std::memory_order_relaxed), 0);
+
+    std::byte tmp[256];
+    DispatchUntil(*ring_, [&] {
+        while (::recv(remote_fd, tmp, sizeof(tmp), MSG_DONTWAIT) > 0) {}
+        return !sess->BackpressureActive();
+    });
+    DispatchUntil(*ring_, [&] {
+        return sess->recv_bytes.load(std::memory_order_relaxed) == 6;
+    });
+
+    EXPECT_EQ(sess->recv_bytes.load(std::memory_order_relaxed), 6);
 
     ::close(remote_fd);
 }

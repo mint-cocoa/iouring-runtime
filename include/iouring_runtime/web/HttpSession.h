@@ -32,6 +32,10 @@ public:
                          std::uint64_t file_size,
                          std::uint32_t chunk_size,
                          std::uint32_t max_chunks_per_write);
+    bool StartBodyStream(core::buffer::SendBufferRef header,
+                         std::shared_ptr<const std::string> body,
+                         std::uint32_t chunk_size,
+                         std::uint32_t max_chunks_per_write);
     static std::string GenerateRequestId();
 
 protected:
@@ -59,6 +63,14 @@ private:
         bool active = false;
     };
 
+    struct BodyStreamState {
+        std::shared_ptr<const std::string> body;
+        std::size_t offset = 0;
+        std::uint32_t chunk_size = 256 * 1024;
+        std::uint32_t max_chunks_per_write = 4;
+        bool active = false;
+    };
+
     void HandleHttpRecv(const std::byte* data, std::uint32_t len);
     HttpBodyMode PrepareRequestBody(HttpRequest& request);
     bool HandleBodyChunk(HttpRequest& request, std::span<const std::byte> chunk);
@@ -73,11 +85,14 @@ private:
     bool ActiveStreamResponseSent() const;
     bool PumpFileStream();
     void ResetFileStream();
+    bool PumpBodyStream();
+    void ResetBodyStream();
 
     const Router& router_;
     HttpParser parser_;
     core::buffer::RecvBuffer recv_buffer_;
     FileStreamState file_stream_;
+    BodyStreamState body_stream_;
     std::chrono::milliseconds request_timeout_{0};
     std::chrono::milliseconds slow_request_threshold_{0};
     std::chrono::steady_clock::time_point request_started_at_{};

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstring>
 #include <unistd.h>
 
 namespace obs = iouring_runtime::observability;
@@ -92,6 +93,58 @@ void HttpSession::ResetFileStream() {
     file_stream_.fd.Reset();
     file_stream_.remaining_bytes = 0;
     file_stream_.active = false;
+}
+
+bool HttpSession::PumpBodyStream() {
+    if (!body_stream_.active) {
+        return true;
+    }
+    if (!body_stream_.body || body_stream_.offset >= body_stream_.body->size()) {
+        ResetBodyStream();
+        return true;
+    }
+
+    for (std::uint32_t i = 0;
+         i < body_stream_.max_chunks_per_write &&
+         body_stream_.offset < body_stream_.body->size();
+         ++i) {
+        const auto remaining = body_stream_.body->size() - body_stream_.offset;
+        const auto next_size = static_cast<std::uint32_t>(
+            std::min<std::size_t>(remaining, body_stream_.chunk_size));
+        auto buffer_result = Pool().Allocate(next_size);
+        if (!buffer_result) {
+            obs::LogError(kLogCategory,
+                          "HttpSession[fd={}]: failed to allocate body stream buffer",
+                          Fd());
+            ResetBodyStream();
+            Disconnect();
+            return false;
+        }
+
+        auto buffer = std::move(*buffer_result);
+        auto writable = buffer->Writable();
+        std::memcpy(writable.data(),
+                    body_stream_.body->data() + body_stream_.offset,
+                    next_size);
+        buffer->Commit(next_size);
+        body_stream_.offset += next_size;
+
+        if (!Send(std::move(buffer)).has_value()) {
+            ResetBodyStream();
+            return false;
+        }
+    }
+
+    if (body_stream_.body && body_stream_.offset >= body_stream_.body->size()) {
+        ResetBodyStream();
+    }
+    return true;
+}
+
+void HttpSession::ResetBodyStream() {
+    body_stream_.body.reset();
+    body_stream_.offset = 0;
+    body_stream_.active = false;
 }
 
 } // namespace iouring_runtime::web

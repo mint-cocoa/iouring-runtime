@@ -7,14 +7,20 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstring>
 #include <ctime>
+#include <memory>
 #include <string>
 #include <string_view>
 
 namespace iouring_runtime::web {
 
 namespace {
+
+constexpr std::size_t kInlineResponseMaxBytes = 256 * 1024;
+constexpr std::uint32_t kBodyStreamChunkSize = 256 * 1024;
+constexpr std::uint32_t kBodyStreamMaxChunksPerWrite = 4;
 
 std::string_view CurrentHttpDate() {
     const std::time_t now = std::time(nullptr);
@@ -59,6 +65,19 @@ bool HeaderNameEquals(std::string_view lhs, std::string_view rhs) {
 bool StatusMustNotHaveBody(HttpStatus status) {
     return status == HttpStatus::kNoContent ||
            status == HttpStatus::kNotModified;
+}
+
+core::buffer::SendBufferRef BufferFromBytes(core::buffer::BufferPool& pool,
+                                            std::string_view bytes) {
+    auto result = pool.Allocate(static_cast<std::uint32_t>(bytes.size()));
+    if (!result) {
+        return nullptr;
+    }
+    auto buffer = std::move(*result);
+    auto writable = buffer->Writable();
+    std::memcpy(writable.data(), bytes.data(), bytes.size());
+    buffer->Commit(static_cast<std::uint32_t>(bytes.size()));
+    return buffer;
 }
 
 } // namespace
@@ -190,6 +209,44 @@ core::buffer::SendBufferRef HttpResponse::Build(
     return buffer;
 }
 
+std::vector<core::buffer::SendBufferRef> HttpResponse::BuildBuffers(
+    core::buffer::BufferPool& pool,
+    std::uint32_t body_chunk_size) const {
+    const bool status_no_body = StatusMustNotHaveBody(status_);
+    const bool no_body = status_no_body || suppress_body_;
+    const auto headers = SerializeHeaders(body_.size());
+    const auto chunk_size = std::max<std::uint32_t>(body_chunk_size, 1);
+
+    std::vector<core::buffer::SendBufferRef> buffers;
+    buffers.reserve(no_body ? 1 : 1 + ((body_.size() + chunk_size - 1) /
+                                       chunk_size));
+
+    auto header = BufferFromBytes(pool, headers);
+    if (!header) {
+        return {};
+    }
+    buffers.push_back(std::move(header));
+
+    if (!no_body) {
+        std::size_t offset = 0;
+        while (offset < body_.size()) {
+            const auto next_size = std::min<std::size_t>(chunk_size,
+                                                         body_.size() - offset);
+            auto body_buffer =
+                BufferFromBytes(pool, std::string_view(body_).substr(offset,
+                                                                     next_size));
+            if (!body_buffer) {
+                return {};
+            }
+            buffers.push_back(std::move(body_buffer));
+            offset += next_size;
+        }
+    }
+
+    last_built_bytes_ = headers.size() + (no_body ? 0 : body_.size());
+    return buffers;
+}
+
 void HttpResponse::Send() {
     if (state_ == State::kSent) {
         return;
@@ -198,10 +255,34 @@ void HttpResponse::Send() {
     if (!session_ || !pool_) {
         return;
     }
-    auto buffer = Build(*pool_);
-    if (buffer) {
-        session_->SendResponse(std::move(buffer));
+
+    const bool status_no_body = StatusMustNotHaveBody(status_);
+    const bool no_body = status_no_body || suppress_body_;
+    const auto headers = SerializeHeaders(body_.size());
+    const auto total_size = headers.size() + (no_body ? 0 : body_.size());
+    last_built_bytes_ = total_size;
+
+    if (total_size <= kInlineResponseMaxBytes) {
+        auto buffer = Build(*pool_);
+        if (buffer) {
+            session_->SendResponse(std::move(buffer));
+            return;
+        }
     }
+
+    auto header = BufferFromBytes(*pool_, headers);
+    if (!header) {
+        return;
+    }
+    if (no_body || body_.empty()) {
+        session_->SendResponse(std::move(header));
+        return;
+    }
+
+    auto body = std::make_shared<std::string>(std::move(body_));
+    session_->StartBodyStream(std::move(header), std::move(body),
+                              kBodyStreamChunkSize,
+                              kBodyStreamMaxChunksPerWrite);
 }
 
 bool HttpResponse::SendFile(std::string path, std::string_view content_type,

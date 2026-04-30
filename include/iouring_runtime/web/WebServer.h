@@ -49,6 +49,8 @@ struct WebServerConfig {
         std::size_t send_queue_high_bytes = 0;
         std::size_t send_queue_low_bytes = 0;
         bool disconnect_on_high_watermark = false;
+        std::chrono::milliseconds disconnect_after{0};
+        bool pause_recv_on_high_watermark = false;
     };
 
     struct ObservabilityOptions {

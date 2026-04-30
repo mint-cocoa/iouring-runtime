@@ -27,7 +27,11 @@ struct SendQueueBackpressureOptions {
     std::uint32_t send_queue_max_pending;
     std::uint32_t send_queue_high_watermark;
     std::uint32_t send_queue_low_watermark;
+    std::size_t send_queue_high_bytes = 0;
+    std::size_t send_queue_low_bytes = 0;
     bool disconnect_on_high_watermark;
+    std::chrono::milliseconds disconnect_after{0};
+    bool pause_recv_on_high_watermark = false;
 };
 
 } // namespace iouring_runtime::core

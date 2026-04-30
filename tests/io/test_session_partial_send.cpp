@@ -4,8 +4,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <cstddef>
 #include <cstring>
+#include <string_view>
 #include <sys/uio.h>
 #include <vector>
 
@@ -137,6 +139,37 @@ TEST_F(PartialSendFixture, AdvanceBySumEmptiesBothVectors) {
     EXPECT_TRUE(bufs.empty());
     EXPECT_TRUE(first_weak.expired());
     EXPECT_TRUE(second_weak.expired());
+}
+
+TEST(SessionDisconnectClassificationTest, TreatsPeerCloseAsExpectedDisconnect) {
+    EXPECT_TRUE(Session::IsExpectedDisconnectResult(0));
+    EXPECT_EQ(Session::DisconnectReasonForResult(0), std::string_view("PEER_CLOSE"));
+}
+
+TEST(SessionDisconnectClassificationTest, TreatsCommonClientShutdownErrorsAsExpected) {
+    EXPECT_TRUE(Session::IsExpectedDisconnectResult(-ECONNRESET));
+    EXPECT_EQ(Session::DisconnectReasonForResult(-ECONNRESET),
+              std::string_view("CONNECTION_RESET"));
+
+    EXPECT_TRUE(Session::IsExpectedDisconnectResult(-EPIPE));
+    EXPECT_EQ(Session::DisconnectReasonForResult(-EPIPE), std::string_view("BROKEN_PIPE"));
+
+    EXPECT_TRUE(Session::IsExpectedDisconnectResult(-ENOTCONN));
+    EXPECT_EQ(Session::DisconnectReasonForResult(-ENOTCONN),
+              std::string_view("NOT_CONNECTED"));
+
+    EXPECT_TRUE(Session::IsExpectedDisconnectResult(-ESHUTDOWN));
+    EXPECT_EQ(Session::DisconnectReasonForResult(-ESHUTDOWN),
+              std::string_view("SOCKET_SHUTDOWN"));
+}
+
+TEST(SessionDisconnectClassificationTest, KeepsUnexpectedTransportErrorsVisible) {
+    EXPECT_FALSE(Session::IsExpectedDisconnectResult(-EINVAL));
+    EXPECT_EQ(Session::DisconnectReasonForResult(-EINVAL),
+              std::string_view("TRANSPORT_ERROR"));
+
+    EXPECT_FALSE(Session::IsExpectedDisconnectResult(12));
+    EXPECT_EQ(Session::DisconnectReasonForResult(12), std::string_view("OK"));
 }
 
 TEST(SendBufferPoolTest, ReusesReleasedPartiallyFilledChunk) {

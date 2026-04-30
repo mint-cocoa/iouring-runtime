@@ -110,6 +110,10 @@ void WebServer::Start() {
             session->SetBackpressureByteWatermarks(
                 backpressure.send_queue_high_bytes,
                 backpressure.send_queue_low_bytes);
+            session->SetPauseRecvOnBackpressure(
+                backpressure.pause_recv_on_high_watermark);
+            session->SetBackpressureDisconnectDelay(
+                backpressure.disconnect_after);
             session->SetDisconnectOnHighWatermark(
                 backpressure.disconnect_on_high_watermark);
             return session;

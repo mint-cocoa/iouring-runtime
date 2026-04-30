@@ -88,6 +88,8 @@ public:
     static void AdvanceSendState(std::vector<struct iovec>& iovs,
                                  std::vector<buffer::SendBufferRef>& bufs,
                                  std::size_t advanced);
+    static bool IsExpectedDisconnectResult(std::int32_t result);
+    static std::string_view DisconnectReasonForResult(std::int32_t result);
     buffer::SendQueue::Stats SendQueueStats() const { return send_queue_.Snapshot(); }
     void SetSessionId(iouring_runtime::core::SessionId id) { session_id_ = id; }
     void SetConnectedCallback(ConnectedCallback cb) { on_connected_ = std::move(cb); }
@@ -133,6 +135,10 @@ public:
     void SetDisconnectOnHighWatermark(bool enable) {
         disconnect_on_high_watermark_ = enable;
     }
+    void SetPauseRecvOnBackpressure(bool enable) {
+        pause_recv_on_backpressure_ = enable;
+    }
+    void SetBackpressureDisconnectDelay(std::chrono::milliseconds delay);
     bool BackpressureActive() const { return backpressure_active_; }
 
 protected:
@@ -160,6 +166,8 @@ protected:
 
 private:
     bool CanDisconnectAfterFlush() const;
+    bool DisconnectIfBackpressureExpired(std::chrono::steady_clock::time_point now);
+    bool FlushPausedRecvBuffer();
     void RegisterRecv();
     void RegisterSend();
     void SendBatch(std::vector<SendBufferRef> bufs);
@@ -194,6 +202,9 @@ private:
     std::size_t backpressure_high_bytes_ = 0;
     std::size_t backpressure_low_bytes_ = 0;
     bool disconnect_on_high_watermark_ = false;
+    bool pause_recv_on_backpressure_ = false;
+    std::chrono::milliseconds backpressure_disconnect_delay_{0};
+    std::chrono::steady_clock::time_point backpressure_active_since_{};
 
     // Counts in-flight io_uring ops whose CQEs reference Session members.
     // self_ref_ must not be released until this reaches zero.

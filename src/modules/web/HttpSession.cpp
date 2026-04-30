@@ -58,7 +58,7 @@ bool HttpSession::StartFileStream(core::buffer::SendBufferRef header,
                                   std::uint64_t file_size,
                                   std::uint32_t chunk_size,
                                   std::uint32_t max_chunks_per_write) {
-    if (!header || file_fd < 0 || file_stream_.active) {
+    if (!header || file_fd < 0 || file_stream_.active || body_stream_.active) {
         return false;
     }
 
@@ -77,18 +77,45 @@ bool HttpSession::StartFileStream(core::buffer::SendBufferRef header,
     return PumpFileStream();
 }
 
+bool HttpSession::StartBodyStream(core::buffer::SendBufferRef header,
+                                  std::shared_ptr<const std::string> body,
+                                  std::uint32_t chunk_size,
+                                  std::uint32_t max_chunks_per_write) {
+    if (!header || !body || file_stream_.active || body_stream_.active) {
+        return false;
+    }
+
+    body_stream_.body = std::move(body);
+    body_stream_.offset = 0;
+    body_stream_.chunk_size = std::max<std::uint32_t>(chunk_size, 4 * 1024);
+    body_stream_.max_chunks_per_write =
+        std::max<std::uint32_t>(max_chunks_per_write, 1);
+    body_stream_.active = true;
+
+    if (!Send(std::move(header)).has_value()) {
+        ResetBodyStream();
+        return false;
+    }
+
+    return PumpBodyStream();
+}
+
 void HttpSession::OnRecv(std::span<const std::byte> data) {
     HandleHttpRecv(data.data(), static_cast<std::uint32_t>(data.size()));
 }
 
 void HttpSession::OnDisconnected() {
     ResetFileStream();
+    ResetBodyStream();
     AbortStreamingRequest();
 }
 
 void HttpSession::OnSocketDrained() {
     if (file_stream_.active) {
         PumpFileStream();
+    }
+    if (body_stream_.active) {
+        PumpBodyStream();
     }
 }
 

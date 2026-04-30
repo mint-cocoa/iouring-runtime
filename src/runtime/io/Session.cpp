@@ -19,6 +19,47 @@ constexpr auto kLogCategory = obs::LogCategory::kSession;
 
 namespace iouring_runtime::core::io {
 
+bool Session::IsExpectedDisconnectResult(std::int32_t result) {
+    if (result == 0) {
+        return true;
+    }
+    if (result > 0) {
+        return false;
+    }
+
+    switch (-result) {
+    case ECONNRESET:
+    case EPIPE:
+    case ENOTCONN:
+    case ESHUTDOWN:
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::string_view Session::DisconnectReasonForResult(std::int32_t result) {
+    if (result == 0) {
+        return "PEER_CLOSE";
+    }
+    if (result > 0) {
+        return "OK";
+    }
+
+    switch (-result) {
+    case ECONNRESET:
+        return "CONNECTION_RESET";
+    case EPIPE:
+        return "BROKEN_PIPE";
+    case ENOTCONN:
+        return "NOT_CONNECTED";
+    case ESHUTDOWN:
+        return "SOCKET_SHUTDOWN";
+    default:
+        return "TRANSPORT_ERROR";
+    }
+}
+
 Session::Session(int fd, IoRing& ring, BufferPool& pool,
                  std::uint32_t send_queue_max_pending)
     : socket_(fd)
@@ -85,6 +126,13 @@ void Session::SetTimeoutCheckInterval(std::chrono::milliseconds interval) {
         check_interval_ = interval;
 }
 
+void Session::SetBackpressureDisconnectDelay(std::chrono::milliseconds delay) {
+    backpressure_disconnect_delay_ = delay;
+    if (delay.count() > 0) {
+        SetTimeoutCheckInterval(delay / 4);
+    }
+}
+
 void Session::Start() {
     auto self = std::static_pointer_cast<Session>(shared_from_this());
     self_ref_ = self;  // self-ownership: Session keeps itself alive
@@ -120,6 +168,9 @@ void Session::ResumeRecv() {
     }
 
     recv_paused_ = false;
+    if (!FlushPausedRecvBuffer()) {
+        return;
+    }
     if (!recv_armed_ && !recv_cancel_requested_ && !disconnecting_) {
         RegisterRecv();
     }
@@ -179,6 +230,7 @@ void Session::OnRecv(ring::RecvEvent&,
 
     // Always return provided buffer to the ring, even during disconnect.
     // Failing to return leaks buffers from the provided buffer pool.
+    bool pause_buffer_overflow = false;
     if (has_buffer) {
         std::uint16_t buf_id = flags >> IORING_CQE_BUFFER_SHIFT;
         auto& buf_ring = ring_.BufRing();
@@ -186,10 +238,22 @@ void Session::OnRecv(ring::RecvEvent&,
         if (res > 0 && !disconnecting_) {
             last_activity_ = std::chrono::steady_clock::now();
             auto view = buf_ring.View(buf_id, static_cast<std::uint32_t>(res));
-            OnRecv(view);
+            if (recv_paused_) {
+                pause_buffer_overflow = !recv_buf_.Append(view).has_value();
+            } else {
+                OnRecv(view);
+            }
         }
 
         buf_ring.Return(buf_id);
+    }
+
+    if (pause_buffer_overflow) {
+        obs::LogError(kLogCategory,
+                      "Session[fd={}]: [DISC:PAUSED_RECV_OVERFLOW] paused recv buffer overflow",
+                      Fd());
+        Disconnect();
+        return;
     }
 
     // During disconnect, skip normal error handling — just wait for
@@ -209,7 +273,8 @@ void Session::OnRecv(ring::RecvEvent&,
     // Normal error handling
     if (res == 0) {
         // Peer closed session
-        obs::LogWarn(kLogCategory, "Session[fd={}]: [DISC:PEER_CLOSE] peer closed connection", Fd());
+        obs::LogDebug(kLogCategory, "Session[fd={}]: [DISC:{}] peer closed connection",
+                      Fd(), DisconnectReasonForResult(res));
         Disconnect();
         return;
     }
@@ -224,7 +289,13 @@ void Session::OnRecv(ring::RecvEvent&,
     }
 
     if (res < 0) {
-        obs::LogError(kLogCategory, "Session[fd={}]: [DISC:RECV_ERR] recv error res={}", Fd(), res);
+        if (IsExpectedDisconnectResult(res)) {
+            obs::LogDebug(kLogCategory, "Session[fd={}]: [DISC:{}] recv closed res={}",
+                          Fd(), DisconnectReasonForResult(res), res);
+        } else {
+            obs::LogError(kLogCategory, "Session[fd={}]: [DISC:RECV_ERR] recv error res={}",
+                          Fd(), res);
+        }
         Disconnect();
         return;
     }
@@ -264,6 +335,41 @@ bool Session::CanDisconnectAfterFlush() const {
            send_queue_.Snapshot().current_depth == 0 &&
            in_flight_bufs_.empty() &&
            !HasPendingAppWork();
+}
+
+bool Session::DisconnectIfBackpressureExpired(
+    std::chrono::steady_clock::time_point now) {
+    if (!disconnect_on_high_watermark_ || !backpressure_active_ ||
+        backpressure_disconnect_delay_.count() <= 0 ||
+        backpressure_active_since_ == std::chrono::steady_clock::time_point{}) {
+        return false;
+    }
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - backpressure_active_since_);
+    if (elapsed < backpressure_disconnect_delay_) {
+        return false;
+    }
+
+    obs::LogWarn(kLogCategory,
+                 "Session[fd={}]: [DISC:SLOW_CLIENT_TIMEOUT] send queue pressure elapsed={}ms timeout={}ms",
+                 Fd(), elapsed.count(), backpressure_disconnect_delay_.count());
+    Disconnect();
+    return true;
+}
+
+bool Session::FlushPausedRecvBuffer() {
+    if (recv_buf_.IsEmpty()) {
+        return true;
+    }
+
+    auto pending = recv_buf_.ReadRegion();
+    OnRecv(pending);
+    recv_buf_.OnRead(static_cast<std::uint32_t>(pending.size()));
+    if (recv_buf_.ShouldCompact()) {
+        recv_buf_.Compact();
+    }
+    return !disconnecting_;
 }
 
 void Session::MaybeDisconnectAfterFlush() {
@@ -337,6 +443,8 @@ void Session::OnTimeout(ring::TimeoutEvent& /*ev*/, std::int32_t res) {
     if (res == -ECANCELED) return;
 
     auto now = std::chrono::steady_clock::now();
+    if (DisconnectIfBackpressureExpired(now)) return;
+
     if (OnTimeoutTick(now)) return;
 
     auto idle = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_activity_);
