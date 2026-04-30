@@ -23,7 +23,8 @@ public:
                 core::buffer::BufferPool& pool, const Router& router,
                 std::uint32_t send_queue_max_pending = 4096,
                 HttpParserOptions parser_options = {},
-                std::chrono::milliseconds request_timeout = {});
+                std::chrono::milliseconds request_timeout = {},
+                std::chrono::milliseconds slow_request_threshold = {});
 
     void SendResponse(core::buffer::SendBufferRef buf);
     bool StartFileStream(core::buffer::SendBufferRef header,
@@ -78,6 +79,7 @@ private:
     core::buffer::RecvBuffer recv_buffer_;
     FileStreamState file_stream_;
     std::chrono::milliseconds request_timeout_{0};
+    std::chrono::milliseconds slow_request_threshold_{0};
     std::chrono::steady_clock::time_point request_started_at_{};
     StreamingRequestState active_stream_;
     std::uint32_t async_work_count_ = 0;

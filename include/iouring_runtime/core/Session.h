@@ -122,6 +122,14 @@ public:
             backpressure_low_watermark_ = backpressure_high_watermark_;
         }
     }
+    void SetBackpressureByteWatermarks(std::size_t high, std::size_t low) {
+        backpressure_high_bytes_ = high;
+        backpressure_low_bytes_ = low;
+        if (backpressure_high_bytes_ != 0 &&
+            backpressure_low_bytes_ > backpressure_high_bytes_) {
+            backpressure_low_bytes_ = backpressure_high_bytes_;
+        }
+    }
     void SetDisconnectOnHighWatermark(bool enable) {
         disconnect_on_high_watermark_ = enable;
     }
@@ -146,13 +154,16 @@ protected:
     void EndAppIo();
     void MaybeDisconnectAfterFlush();
     bool HasPendingSocketWrites() const;
-    void UpdateBackpressureState(std::size_t depth_hint = 0, bool hint_valid = false);
+    void UpdateBackpressureState(std::size_t depth_hint = 0,
+                                 std::size_t bytes_hint = 0,
+                                 bool hint_valid = false);
 
 private:
     bool CanDisconnectAfterFlush() const;
     void RegisterRecv();
     void RegisterSend();
     void SendBatch(std::vector<SendBufferRef> bufs);
+    void SendInFlightBatch();
     void ArmWatchdog();
     void OnRecv(ring::RecvEvent& ev, std::int32_t result, std::uint32_t flags) override;
     void OnSend(ring::SendEvent& ev, std::int32_t result) override;
@@ -180,6 +191,8 @@ private:
     bool backpressure_active_ = false;
     std::size_t backpressure_high_watermark_ = 0;
     std::size_t backpressure_low_watermark_ = 0;
+    std::size_t backpressure_high_bytes_ = 0;
+    std::size_t backpressure_low_bytes_ = 0;
     bool disconnect_on_high_watermark_ = false;
 
     // Counts in-flight io_uring ops whose CQEs reference Session members.

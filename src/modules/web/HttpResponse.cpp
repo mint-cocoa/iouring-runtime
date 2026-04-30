@@ -16,14 +16,23 @@ namespace iouring_runtime::web {
 
 namespace {
 
+std::string_view CurrentHttpDate() {
+    const std::time_t now = std::time(nullptr);
+    thread_local std::time_t cached_time = 0;
+    thread_local char cached_value[32] = {};
+    if (now != cached_time) {
+        cached_time = now;
+        std::tm tm{};
+        gmtime_r(&now, &tm);
+        std::strftime(cached_value, sizeof(cached_value),
+                      "%a, %d %b %Y %H:%M:%S GMT", &tm);
+    }
+    return cached_value;
+}
+
 void AppendDateHeader(std::string& out) {
     out += "Date: ";
-    const std::time_t now = std::time(nullptr);
-    std::tm tm{};
-    gmtime_r(&now, &tm);
-    char buf[32];
-    std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tm);
-    out += buf;
+    out += CurrentHttpDate();
     out += "\r\n";
 }
 

@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -45,7 +46,13 @@ struct WebServerConfig {
         std::uint32_t send_queue_max_pending = 4096;
         std::uint32_t send_queue_high_watermark = 0;
         std::uint32_t send_queue_low_watermark = 0;
+        std::size_t send_queue_high_bytes = 0;
+        std::size_t send_queue_low_bytes = 0;
         bool disconnect_on_high_watermark = false;
+    };
+
+    struct ObservabilityOptions {
+        std::chrono::milliseconds slow_request_threshold{0};
     };
 
     std::string host = "0.0.0.0";
@@ -58,6 +65,7 @@ struct WebServerConfig {
     TimeoutOptions timeouts;
     ShutdownOptions shutdown;
     BackpressureOptions backpressure;
+    ObservabilityOptions observability;
 };
 
 class WebServer {

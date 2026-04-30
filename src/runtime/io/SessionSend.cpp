@@ -28,7 +28,7 @@ std::expected<void, io::IoError> Session::Send(buffer::SendBufferRef buf) {
         Disconnect();
         return std::unexpected(IoError::kSendFailed);
     }
-    UpdateBackpressureState(result.current_depth, true);
+    UpdateBackpressureState(result.current_depth, result.current_bytes, true);
     if (result.needs_register) {
         RegisterSend();
     }
@@ -81,9 +81,8 @@ void Session::OnSend(ring::SendEvent&, std::int32_t res) {
     send_iovecs_.clear();
 
     send_queue_.MarkSent();
-    auto pending = send_queue_.Drain(kMaxSendIovecs);
-    if (!pending.empty()) {
-        SendBatch(std::move(pending));
+    if (send_queue_.DrainInto(in_flight_bufs_, kMaxSendIovecs) != 0) {
+        SendInFlightBatch();
         return;
     }
 
@@ -92,27 +91,41 @@ void Session::OnSend(ring::SendEvent&, std::int32_t res) {
     MaybeDisconnectAfterFlush();
 }
 
-void Session::UpdateBackpressureState(std::size_t depth_hint, bool hint_valid) {
-    if (backpressure_high_watermark_ == 0) {
+void Session::UpdateBackpressureState(std::size_t depth_hint,
+                                      std::size_t bytes_hint,
+                                      bool hint_valid) {
+    if (backpressure_high_watermark_ == 0 && backpressure_high_bytes_ == 0) {
         return;
     }
 
-    const std::size_t depth = hint_valid ? depth_hint : send_queue_.Snapshot().current_depth;
+    const auto stats = hint_valid ? buffer::SendQueue::Stats{
+        .current_depth = depth_hint,
+        .pending_bytes = bytes_hint,
+    } : send_queue_.Snapshot();
+    const bool depth_high = backpressure_high_watermark_ != 0 &&
+                            stats.current_depth >= backpressure_high_watermark_;
+    const bool bytes_high = backpressure_high_bytes_ != 0 &&
+                            stats.pending_bytes >= backpressure_high_bytes_;
+    const bool depth_low = backpressure_high_watermark_ == 0 ||
+                           stats.current_depth <= backpressure_low_watermark_;
+    const bool bytes_low = backpressure_high_bytes_ == 0 ||
+                           stats.pending_bytes <= backpressure_low_bytes_;
 
-    if (!backpressure_active_ && depth >= backpressure_high_watermark_) {
+    if (!backpressure_active_ && (depth_high || bytes_high)) {
         backpressure_active_ = true;
         if (on_backpressure_) {
             on_backpressure_(std::static_pointer_cast<Session>(shared_from_this()), true);
         }
         if (disconnect_on_high_watermark_ && !disconnecting_) {
-            obs::LogWarn(kLogCategory, "Session[fd={}]: [DISC:SLOW_CLIENT] send queue high watermark {} reached",
-                         Fd(), backpressure_high_watermark_);
+            obs::LogWarn(kLogCategory,
+                         "Session[fd={}]: [DISC:SLOW_CLIENT] send queue pressure depth={} bytes={}",
+                         Fd(), stats.current_depth, stats.pending_bytes);
             Disconnect();
         }
         return;
     }
 
-    if (backpressure_active_ && depth <= backpressure_low_watermark_) {
+    if (backpressure_active_ && depth_low && bytes_low) {
         backpressure_active_ = false;
         if (on_backpressure_) {
             on_backpressure_(std::static_pointer_cast<Session>(shared_from_this()), false);
@@ -123,10 +136,9 @@ void Session::UpdateBackpressureState(std::size_t depth_hint, bool hint_valid) {
 void Session::RegisterSend() {
     if (disconnecting_) return;
 
-    auto bufs = send_queue_.Drain(kMaxSendIovecs);
-    if (bufs.empty()) return;
+    if (send_queue_.DrainInto(in_flight_bufs_, kMaxSendIovecs) == 0) return;
 
-    SendBatch(std::move(bufs));
+    SendInFlightBatch();
 }
 
 void Session::AdvanceSendState(std::vector<struct iovec>& iovs,
@@ -151,14 +163,20 @@ void Session::AdvanceSendState(std::vector<struct iovec>& iovs,
 void Session::SendBatch(std::vector<SendBufferRef> bufs) {
     if (disconnecting_ || bufs.empty()) return;
 
+    in_flight_bufs_ = std::move(bufs);
+    SendInFlightBatch();
+}
+
+void Session::SendInFlightBatch() {
+    if (disconnecting_ || in_flight_bufs_.empty()) return;
+
+    auto& bufs = in_flight_bufs_;
     send_iovecs_.resize(bufs.size());
     for (std::size_t i = 0; i < bufs.size(); ++i) {
         auto data = bufs[i]->Data();
         send_iovecs_[i].iov_base = const_cast<std::byte*>(data.data());
         send_iovecs_[i].iov_len = data.size();
     }
-
-    in_flight_bufs_ = std::move(bufs);
 
     std::memset(&send_msg_, 0, sizeof(send_msg_));
     send_msg_.msg_iov = send_iovecs_.data();

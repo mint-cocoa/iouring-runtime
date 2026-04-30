@@ -91,20 +91,25 @@ void WebServer::Start() {
         const auto parser_options = config_.parser;
         const auto timeouts = config_.timeouts;
         const auto backpressure = config_.backpressure;
+        const auto observability = config_.observability;
         core::io::SessionFactory factory =
-            [router, parser_options, timeouts, backpressure, raw_worker](
+            [router, parser_options, timeouts, backpressure, observability, raw_worker](
                 int fd, core::ring::IoRing& ring,
                 core::buffer::BufferPool& pool, core::ContextId)
                 -> core::io::SessionRef {
             auto session = std::make_shared<HttpSession>(
                 fd, ring, pool, *router, backpressure.send_queue_max_pending,
-                parser_options, timeouts.request);
+                parser_options, timeouts.request,
+                observability.slow_request_threshold);
             session->SetSessionId(raw_worker->next_session_id.fetch_add(
                 1, std::memory_order_relaxed));
             session->SetInactivityTimeout(timeouts.inactivity);
             session->SetBackpressureWatermarks(
                 backpressure.send_queue_high_watermark,
                 backpressure.send_queue_low_watermark);
+            session->SetBackpressureByteWatermarks(
+                backpressure.send_queue_high_bytes,
+                backpressure.send_queue_low_bytes);
             session->SetDisconnectOnHighWatermark(
                 backpressure.disconnect_on_high_watermark);
             return session;

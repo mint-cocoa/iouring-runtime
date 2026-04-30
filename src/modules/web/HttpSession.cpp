@@ -27,11 +27,13 @@ HttpSession::HttpSession(int fd, core::ring::IoRing& ring,
                          const Router& router,
                          std::uint32_t send_queue_max_pending,
                          HttpParserOptions parser_options,
-                         std::chrono::milliseconds request_timeout)
+                         std::chrono::milliseconds request_timeout,
+                         std::chrono::milliseconds slow_request_threshold)
     : Session(fd, ring, pool, send_queue_max_pending)
     , router_(router)
     , parser_(parser_options)
-    , request_timeout_(request_timeout) {
+    , request_timeout_(request_timeout)
+    , slow_request_threshold_(slow_request_threshold) {
     if (request_timeout_.count() > 0) {
         SetTimeoutCheckInterval(request_timeout_ / 4);
     }

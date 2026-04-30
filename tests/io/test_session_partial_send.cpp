@@ -1,5 +1,6 @@
 #include <iouring_runtime/core/Session.h>
 #include <iouring_runtime/core/SendBuffer.h>
+#include <iouring_runtime/core/SendQueue.h>
 
 #include <gtest/gtest.h>
 
@@ -146,4 +147,40 @@ TEST(SendBufferPoolTest, ReusesReleasedPartiallyFilledChunk) {
 
     auto second = pool.Allocate(100);
     ASSERT_TRUE(second.has_value());
+}
+
+TEST(SendQueueTest, TracksPendingBytesAcrossPartialDrains) {
+    BufferPool pool(1024, 1);
+    SendQueue queue;
+
+    auto first = MakeBuffer(pool, 10, std::byte{0xAA});
+    auto second = MakeBuffer(pool, 20, std::byte{0xBB});
+    auto third = MakeBuffer(pool, 30, std::byte{0xCC});
+
+    auto pushed = queue.Push(std::move(first));
+    EXPECT_EQ(pushed.current_depth, 1u);
+    EXPECT_EQ(pushed.current_bytes, 10u);
+    pushed = queue.Push(std::move(second));
+    EXPECT_EQ(pushed.current_depth, 2u);
+    EXPECT_EQ(pushed.current_bytes, 30u);
+    pushed = queue.Push(std::move(third));
+    EXPECT_EQ(pushed.current_depth, 3u);
+    EXPECT_EQ(pushed.current_bytes, 60u);
+
+    auto stats = queue.Snapshot();
+    EXPECT_EQ(stats.current_depth, 3u);
+    EXPECT_EQ(stats.pending_bytes, 60u);
+    EXPECT_EQ(stats.peak_pending_bytes, 60u);
+
+    std::vector<SendBufferRef> drained;
+    EXPECT_EQ(queue.DrainInto(drained, 2), 2u);
+    stats = queue.Snapshot();
+    EXPECT_EQ(stats.current_depth, 1u);
+    EXPECT_EQ(stats.pending_bytes, 30u);
+    EXPECT_EQ(stats.peak_pending_bytes, 60u);
+
+    EXPECT_EQ(queue.DrainInto(drained), 1u);
+    stats = queue.Snapshot();
+    EXPECT_EQ(stats.current_depth, 0u);
+    EXPECT_EQ(stats.pending_bytes, 0u);
 }
