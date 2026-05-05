@@ -52,8 +52,7 @@ struct DropFile {
 };
 
 struct UploadState {
-    struct PendingWrite {
-        iouring_runtime::core::ring::WriteEvent event;
+    struct PendingWrite : iouring_runtime::core::ring::WriteEvent {
         std::vector<std::byte> buffer;
         std::size_t written = 0;
         std::uint64_t offset = 0;
@@ -507,11 +506,13 @@ public:
         op->buffer.assign(chunk.begin(), chunk.end());
         op->offset = upload_.submitted_bytes;
         upload_.submitted_bytes += chunk.size();
-        auto* event = &op->event;
-        op->event.SetOwner(shared_from_this());
-        pending_.emplace(event, std::move(op));
-        if (!SubmitPendingWrite(*pending_.at(event))) {
+        auto* event = op.release();
+        event->SetStrongOwner(shared_from_this());
+        event->SetAutoDelete(true);
+        pending_.emplace(event, event);
+        if (!SubmitPendingWrite(*event)) {
             pending_.erase(event);
+            delete event;
             TryFinish();
         }
         return true;
@@ -564,7 +565,9 @@ protected:
             if (!SubmitPendingWrite(op)) {
                 pending_.erase(it);
                 TryFinish();
+                return;
             }
+            op.RetainAfterDispatch();
             return;
         }
         upload_.written_bytes += op.buffer.size();
@@ -581,7 +584,7 @@ private:
         }
         const auto remaining = op.buffer.size() - op.written;
         const auto* data = op.buffer.data() + op.written;
-        if (!ring_->PrepWrite(op.event, upload_.fd, data,
+        if (!ring_->PrepWrite(op, upload_.fd, data,
                               static_cast<unsigned>(remaining),
                               op.offset + op.written)) {
             upload_.failed = true;
@@ -683,7 +686,7 @@ private:
     iouring_runtime::core::ring::IoRing* ring_ = nullptr;
     std::optional<DeferredResponse> deferred_;
     std::unordered_map<iouring_runtime::core::ring::WriteEvent*,
-                       std::unique_ptr<PendingWrite>> pending_;
+                       PendingWrite*> pending_;
     std::function<bool(const DropFile&)> commit_;
     std::function<void()> cleanup_;
 };

@@ -19,6 +19,7 @@ protected:
     virtual void OnSend(SendEvent&, std::int32_t) {}
     virtual void OnConnect(ConnectEvent&, std::int32_t) {}
     virtual void OnDisconnect(DisconnectEvent&, std::int32_t) {}
+    virtual void OnCancel(CancelEvent&, std::int32_t) {}
     virtual void OnPoll(PollEvent&, std::int32_t) {}
     virtual void OnTimeout(TimeoutEvent&, std::int32_t) {}
 };
@@ -46,13 +47,14 @@ inline void EventHandler::Dispatch(IoEvent* ev, std::int32_t result, std::uint32
         case EventType::kDisconnect:
             OnDisconnect(static_cast<DisconnectEvent&>(*ev), result);
             break;
+        case EventType::kCancel:
+            OnCancel(static_cast<CancelEvent&>(*ev), result);
+            break;
         case EventType::kPoll:
             OnPoll(static_cast<PollEvent&>(*ev), result);
             break;
         case EventType::kTimeout:
             OnTimeout(static_cast<TimeoutEvent&>(*ev), result);
-            break;
-        case EventType::kCancel:
             break;
     }
 }

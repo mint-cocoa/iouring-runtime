@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <linux/time_types.h>  // struct __kernel_timespec (TimeoutEvent)
+#include <liburing.h>
 
 namespace iouring_runtime::core::ring {
 
@@ -27,23 +28,43 @@ enum class EventType : std::uint8_t {
     kTimeout,
 };
 
-// Base event — stored as io_uring sqe user_data pointer.
-// weak_ptr prevents CQE callbacks from keeping dead objects alive.
+// Base operation context — stored as io_uring SQE user_data and carried back
+// by the CQE. Heap-allocated ops hold their owner alive until final CQE.
 class IoEvent {
 public:
     explicit IoEvent(EventType type) noexcept : type_(type) {}
     virtual ~IoEvent() = default;
 
-    virtual void Init() { owner_.reset(); }
+    virtual void Init() { strong_owner_.reset(); }
+    virtual bool Complete(std::int32_t /*result*/, std::uint32_t /*flags*/) const {
+        return true;
+    }
 
     EventType Type() const noexcept { return type_; }
 
-    EventHandlerRef Owner() const { return owner_.lock(); }
-    void SetOwner(const EventHandlerRef& o) { owner_ = o; }
+    EventHandlerRef Owner() const { return strong_owner_; }
+    void SetStrongOwner(EventHandlerRef o) { strong_owner_ = std::move(o); }
+
+    bool AutoDelete() const noexcept { return auto_delete_; }
+    void SetAutoDelete(bool value) noexcept { auto_delete_ = value; }
+    void RetainAfterDispatch() noexcept { retain_after_dispatch_ = true; }
+    bool ShouldDeleteAfterDispatch(std::int32_t result,
+                                   std::uint32_t flags) noexcept {
+        if (!auto_delete_) {
+            return false;
+        }
+        if (retain_after_dispatch_) {
+            retain_after_dispatch_ = false;
+            return false;
+        }
+        return Complete(result, flags);
+    }
 
 private:
     EventType type_;
-    std::weak_ptr<EventHandler> owner_;
+    EventHandlerRef strong_owner_;
+    bool auto_delete_{false};
+    bool retain_after_dispatch_{false};
 };
 
 // -- Concrete events ----
@@ -51,6 +72,7 @@ private:
 class AcceptEvent : public IoEvent {
 public:
     AcceptEvent() : IoEvent(EventType::kAccept) {}
+    bool Complete(std::int32_t /*result*/, std::uint32_t flags) const override;
 };
 
 class RecvEvent : public IoEvent {
@@ -64,6 +86,7 @@ public:
 
     std::uint16_t BufferId() const noexcept { return buffer_id_; }
     void SetBufferId(std::uint16_t id) noexcept { buffer_id_ = id; }
+    bool Complete(std::int32_t /*result*/, std::uint32_t flags) const override;
 
 private:
     std::uint16_t buffer_id_{0};
@@ -95,6 +118,17 @@ private:
     std::size_t requested_bytes_{0};
 };
 
+class CancelEvent : public IoEvent {
+public:
+    explicit CancelEvent(IoEvent* target = nullptr)
+        : IoEvent(EventType::kCancel), target_(target) {}
+
+    IoEvent* Target() const noexcept { return target_; }
+
+private:
+    IoEvent* target_;
+};
+
 class ConnectEvent : public IoEvent {
 public:
     ConnectEvent() : IoEvent(EventType::kConnect) {}
@@ -119,5 +153,15 @@ public:
     TimeoutEvent() : IoEvent(EventType::kTimeout) {}
     struct __kernel_timespec ts{};
 };
+
+inline bool RecvEvent::Complete(std::int32_t /*result*/,
+                                std::uint32_t flags) const {
+    return (flags & IORING_CQE_F_MORE) == 0;
+}
+
+inline bool AcceptEvent::Complete(std::int32_t /*result*/,
+                                  std::uint32_t flags) const {
+    return (flags & IORING_CQE_F_MORE) == 0;
+}
 
 } // namespace iouring_runtime::core::ring

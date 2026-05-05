@@ -174,6 +174,9 @@ bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
                     keep_alive.push_back(owner);
                     owner->Dispatch(ev, result, flags);
                 }
+                if (ev->ShouldDeleteAfterDispatch(result, flags)) {
+                    delete ev;
+                }
             }
 
             ++count;
@@ -362,18 +365,21 @@ bool IoRing::PrepTimeout(TimeoutEvent& ev, std::chrono::nanoseconds duration) {
     return true;
 }
 
-bool IoRing::PrepCancel(IoEvent& target_ev) {
+bool IoRing::PrepCancel(IoEvent& target_ev, CancelEvent* cancel_ev) {
     io_uring_sqe* sqe = GetSqe();
     if (!sqe) {
         // Best-effort: if cancel SQE fails, shutdown will still terminate
         // the multishot recv by causing it to return EOF.
         obs::LogWarn(kLogCategory, "IoRing::PrepCancel: SQE ring full (shutdown will handle it)");
+        delete cancel_ev;
         return false;
     }
     // First arg: user_data of the target SQE to cancel.
-    // Cancel CQE itself uses user_data=nullptr so Dispatch ignores it.
+    // If cancel_ev is null, the cancel CQE itself uses user_data=nullptr
+    // so Dispatch ignores it. Session close paths pass an owned cancel_ev
+    // to account for the cancel CQE explicitly.
     io_uring_prep_cancel(sqe, &target_ev, 0);
-    io_uring_sqe_set_data(sqe, nullptr);
+    io_uring_sqe_set_data(sqe, cancel_ev);
     return true;
 }
 

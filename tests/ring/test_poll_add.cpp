@@ -29,10 +29,11 @@ TEST(PollAddTest, EventFdTriggersPollin) {
     ASSERT_GE(efd, 0);
 
     auto obj = std::make_shared<PollObject>();
-    PollEvent poll_ev;
-    poll_ev.SetOwner(obj);
+    auto* poll_ev = new PollEvent();
+    poll_ev->SetStrongOwner(obj);
+    poll_ev->SetAutoDelete(true);
 
-    ASSERT_TRUE(ring.PrepPollAdd(poll_ev, efd, POLLIN));
+    ASSERT_TRUE(ring.PrepPollAdd(*poll_ev, efd, POLLIN));
     ring.Submit();
 
     uint64_t val = 1;

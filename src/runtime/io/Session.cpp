@@ -136,10 +136,6 @@ void Session::SetBackpressureDisconnectDelay(std::chrono::milliseconds delay) {
 void Session::Start() {
     auto self = std::static_pointer_cast<Session>(shared_from_this());
     self_ref_ = self;  // self-ownership: Session keeps itself alive
-    recv_ev_.SetOwner(self);
-    send_ev_.SetOwner(self);
-    disconnect_ev_.SetOwner(self);
-    timeout_ev_.SetOwner(self);
     last_activity_ = std::chrono::steady_clock::now();
     OnConnected();
     if (on_connected_)
@@ -154,9 +150,16 @@ void Session::PauseRecv() {
     }
 
     recv_paused_ = true;
-    if (recv_armed_ && !recv_cancel_requested_) {
-        if (ring_.PrepCancel(recv_ev_)) {
+    if (recv_armed_ && !recv_cancel_requested_ && active_recv_ev_) {
+        auto* cancel_ev = new (std::nothrow) ring::CancelEvent(active_recv_ev_);
+        if (!cancel_ev) {
+            return;
+        }
+        cancel_ev->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
+        cancel_ev->SetAutoDelete(true);
+        if (ring_.PrepCancel(*active_recv_ev_, cancel_ev)) {
             recv_cancel_requested_ = true;
+            ++pending_io_;
             ring_.Submit();
         }
     }
@@ -190,10 +193,21 @@ void Session::Disconnect() {
 
     // 1. Shutdown the socket — causes recv to EOF and send to error,
     //    which naturally terminates the multishot recv.
-    if (!ring_.PrepDisconnect(disconnect_ev_, Fd())) {
-        // SQE full: cannot submit shutdown. Force-release to avoid leak.
+    auto self = std::static_pointer_cast<Session>(shared_from_this());
+    auto* disconnect_ev = new (std::nothrow) ring::DisconnectEvent();
+    if (!disconnect_ev) {
+        obs::LogError(kLogCategory, "Session[fd={}]: [DISC:OOM_SHUTDOWN] DisconnectEvent allocation failed", Fd());
+        TryRelease();
+        return;
+    }
+    disconnect_ev->SetStrongOwner(self);
+    disconnect_ev->SetAutoDelete(true);
+    if (!ring_.PrepDisconnect(*disconnect_ev, Fd())) {
+        // SQE full: shutdown could not be submitted. Keep pending_io_ intact;
+        // outstanding recv/send/timeout CQEs still own Session refs and must
+        // drain before self_ref_ is released.
+        delete disconnect_ev;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_SHUTDOWN] PrepDisconnect failed", Fd());
-        pending_io_ = 0;
         TryRelease();
         return;
     }
@@ -202,12 +216,28 @@ void Session::Disconnect() {
     // 2. Cancel multishot recv for faster cleanup (best-effort).
     //    If PrepCancel fails (SQE full), shutdown alone will still
     //    terminate the multishot by delivering EOF.
-    ring_.PrepCancel(recv_ev_);
+    if (active_recv_ev_) {
+        auto* cancel_ev = new (std::nothrow) ring::CancelEvent(active_recv_ev_);
+        if (cancel_ev) {
+            cancel_ev->SetStrongOwner(self);
+            cancel_ev->SetAutoDelete(true);
+            if (ring_.PrepCancel(*active_recv_ev_, cancel_ev)) {
+                ++pending_io_;
+            }
+        }
+    }
 
     // 3. Cancel inactivity watchdog if one is in flight — otherwise we'd
     //    wait up to check_interval_ before pending_io_ reaches zero.
-    if (timeout_armed_) {
-        ring_.PrepCancel(timeout_ev_);
+    if (timeout_armed_ && active_timeout_ev_) {
+        auto* cancel_ev = new (std::nothrow) ring::CancelEvent(active_timeout_ev_);
+        if (cancel_ev) {
+            cancel_ev->SetStrongOwner(self);
+            cancel_ev->SetAutoDelete(true);
+            if (ring_.PrepCancel(*active_timeout_ev_, cancel_ev)) {
+                ++pending_io_;
+            }
+        }
     }
 
     ring_.Submit();
@@ -225,6 +255,7 @@ void Session::OnRecv(ring::RecvEvent&,
     if (!more) {
         recv_armed_ = false;
         recv_cancel_requested_ = false;
+        active_recv_ev_ = nullptr;
         --pending_io_;
     }
 
@@ -310,6 +341,11 @@ void Session::OnDisconnect(ring::DisconnectEvent&, std::int32_t) {
     TryRelease();
 }
 
+void Session::OnCancel(ring::CancelEvent&, std::int32_t) {
+    --pending_io_;
+    TryRelease();
+}
+
 // -- Self-ownership release gate ----
 
 void Session::TryRelease() {
@@ -333,7 +369,7 @@ void Session::ReleaseOwnership() {
 bool Session::CanDisconnectAfterFlush() const {
     return disconnect_after_flush_ &&
            send_queue_.Snapshot().current_depth == 0 &&
-           in_flight_bufs_.empty() &&
+           active_send_ev_ == nullptr &&
            !HasPendingAppWork();
 }
 
@@ -382,7 +418,7 @@ void Session::MaybeDisconnectAfterFlush() {
 }
 
 bool Session::HasPendingSocketWrites() const {
-    return send_queue_.Snapshot().current_depth != 0 || !in_flight_bufs_.empty();
+    return send_queue_.Snapshot().current_depth != 0 || active_send_ev_ != nullptr;
 }
 
 void Session::BeginAppIo() {
@@ -403,13 +439,23 @@ void Session::EndAppIo() {
 void Session::RegisterRecv() {
     if (disconnecting_) return;
     if (recv_paused_ || recv_armed_) return;
+    auto* recv_ev = new (std::nothrow) ring::RecvEvent();
+    if (!recv_ev) {
+        obs::LogError(kLogCategory, "Session[fd={}]: [DISC:OOM_RECV] RecvEvent allocation failed", Fd());
+        Disconnect();
+        return;
+    }
+    recv_ev->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
+    recv_ev->SetAutoDelete(true);
     ++pending_io_;
-    if (!ring_.PrepRecvMultishot(recv_ev_, Fd())) {
+    if (!ring_.PrepRecvMultishot(*recv_ev, Fd())) {
         --pending_io_;
+        delete recv_ev;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_RECV] PrepRecvMultishot failed", Fd());
         Disconnect();
         return;
     }
+    active_recv_ev_ = recv_ev;
     recv_armed_ = true;
     ring_.Submit();
 }
@@ -419,18 +465,30 @@ void Session::ArmWatchdog() {
     if (timeout_armed_) return;
     if (disconnecting_) return;
 
+    auto* timeout_ev = new (std::nothrow) ring::TimeoutEvent();
+    if (!timeout_ev) {
+        obs::LogError(kLogCategory, "Session[fd={}]: ArmWatchdog allocation failed", Fd());
+        return;
+    }
+    timeout_ev->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
+    timeout_ev->SetAutoDelete(true);
     ++pending_io_;
-    if (!ring_.PrepTimeout(timeout_ev_, check_interval_)) {
+    if (!ring_.PrepTimeout(*timeout_ev, check_interval_)) {
         --pending_io_;
+        delete timeout_ev;
         obs::LogError(kLogCategory, "Session[fd={}]: ArmWatchdog SQE full", Fd());
         return;
     }
+    active_timeout_ev_ = timeout_ev;
     timeout_armed_ = true;
     ring_.Submit();
 }
 
-void Session::OnTimeout(ring::TimeoutEvent& /*ev*/, std::int32_t res) {
+void Session::OnTimeout(ring::TimeoutEvent& ev, std::int32_t res) {
     --pending_io_;
+    if (&ev == active_timeout_ev_) {
+        active_timeout_ev_ = nullptr;
+    }
     timeout_armed_ = false;
 
     if (disconnecting_) {

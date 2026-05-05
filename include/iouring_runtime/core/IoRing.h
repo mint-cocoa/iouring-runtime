@@ -62,7 +62,7 @@ public:
     [[nodiscard]] bool PrepSendMsg(SendEvent& ev, int fd, struct msghdr* msg, unsigned flags);
     [[nodiscard]] bool PrepAcceptMultishot(AcceptEvent& ev, int listen_fd);
     [[nodiscard]] bool PrepDisconnect(DisconnectEvent& ev, int fd);
-    bool PrepCancel(IoEvent& target_ev);
+    bool PrepCancel(IoEvent& target_ev, CancelEvent* cancel_ev = nullptr);
     [[nodiscard]] bool PrepConnect(ConnectEvent& ev, int fd, const struct sockaddr* addr, socklen_t len);
     [[nodiscard]] bool PrepPollAdd(PollEvent& ev, int fd, unsigned poll_mask);
     bool PrepPollRemove(PollEvent& ev);

@@ -33,11 +33,12 @@ TEST(IoRingTimeout, FiresEtimeAtRequestedDuration) {
     IoRing::SetCurrent(&ring);
 
     auto obs = std::make_shared<TimeoutObserver>();
-    TimeoutEvent ev;
-    ev.SetOwner(obs);
+    auto* ev = new TimeoutEvent();
+    ev->SetStrongOwner(obs);
+    ev->SetAutoDelete(true);
 
     auto start = std::chrono::steady_clock::now();
-    ASSERT_TRUE(ring.PrepTimeout(ev, 50ms));
+    ASSERT_TRUE(ring.PrepTimeout(*ev, 50ms));
     ring.Submit();
 
     // Wait up to 500ms for the CQE — should really come back in ~50ms.
@@ -60,14 +61,15 @@ TEST(IoRingTimeout, CancellationReportsEcanceled) {
     IoRing::SetCurrent(&ring);
 
     auto obs = std::make_shared<TimeoutObserver>();
-    TimeoutEvent ev;
-    ev.SetOwner(obs);
+    auto* ev = new TimeoutEvent();
+    ev->SetStrongOwner(obs);
+    ev->SetAutoDelete(true);
 
     // Arm a long timeout, then immediately cancel it. The CQE should arrive
     // with -ECANCELED rather than -ETIME.
-    ASSERT_TRUE(ring.PrepTimeout(ev, 10s));
+    ASSERT_TRUE(ring.PrepTimeout(*ev, 10s));
     ring.Submit();
-    ASSERT_TRUE(ring.PrepCancel(ev));
+    ASSERT_TRUE(ring.PrepCancel(*ev));
     ring.Submit();
 
     ring.Dispatch(500ms);
@@ -89,10 +91,11 @@ TEST(IoRingTimeout, DispatchFlushesDeferredSubmissions) {
     IoRing::SetCurrent(&ring);
 
     auto obs = std::make_shared<TimeoutObserver>();
-    TimeoutEvent ev;
-    ev.SetOwner(obs);
+    auto* ev = new TimeoutEvent();
+    ev->SetStrongOwner(obs);
+    ev->SetAutoDelete(true);
 
-    ASSERT_TRUE(ring.PrepTimeout(ev, 10ms));
+    ASSERT_TRUE(ring.PrepTimeout(*ev, 10ms));
     EXPECT_EQ(ring.Submit(), 0) << "first submit should stay deferred";
 
     ring.Dispatch(200ms);
@@ -114,13 +117,15 @@ TEST(IoRingTimeout, DispatchHonorsCqeBatchBudgetAcrossPolls) {
 
     auto first = std::make_shared<TimeoutObserver>();
     auto second = std::make_shared<TimeoutObserver>();
-    TimeoutEvent first_ev;
-    TimeoutEvent second_ev;
-    first_ev.SetOwner(first);
-    second_ev.SetOwner(second);
+    auto* first_ev = new TimeoutEvent();
+    auto* second_ev = new TimeoutEvent();
+    first_ev->SetStrongOwner(first);
+    second_ev->SetStrongOwner(second);
+    first_ev->SetAutoDelete(true);
+    second_ev->SetAutoDelete(true);
 
-    ASSERT_TRUE(ring.PrepTimeout(first_ev, 1ms));
-    ASSERT_TRUE(ring.PrepTimeout(second_ev, 1ms));
+    ASSERT_TRUE(ring.PrepTimeout(*first_ev, 1ms));
+    ASSERT_TRUE(ring.PrepTimeout(*second_ev, 1ms));
     EXPECT_GE(ring.Submit(), 0);
 
     ring.Dispatch(200ms);

@@ -35,12 +35,14 @@ std::expected<void, io::IoError> Session::Send(buffer::SendBufferRef buf) {
     return {};
 }
 
-void Session::OnSend(ring::SendEvent&, std::int32_t res) {
+void Session::OnSend(ring::SendEvent& ev, std::int32_t res) {
+    auto& send_op = static_cast<SendOp&>(ev);
     --pending_io_;
+    if (&send_op == active_send_ev_) {
+        active_send_ev_ = nullptr;
+    }
 
     if (disconnecting_) {
-        in_flight_bufs_.clear();
-        send_iovecs_.clear();
         TryRelease();
         return;
     }
@@ -53,42 +55,38 @@ void Session::OnSend(ring::SendEvent&, std::int32_t res) {
             obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SEND_ERR] send error res={}",
                           Fd(), res);
         }
-        in_flight_bufs_.clear();
-        send_iovecs_.clear();
         Disconnect();
         return;
     }
 
     std::size_t requested = 0;
-    for (const auto& iov : send_iovecs_) requested += iov.iov_len;
+    for (const auto& iov : send_op.iovecs) requested += iov.iov_len;
     const auto sent = static_cast<std::size_t>(res);
 
     if (sent < requested) {
-        AdvanceSendState(send_iovecs_, in_flight_bufs_, sent);
+        AdvanceSendState(send_op.iovecs, send_op.bufs, sent);
 
-        std::memset(&send_msg_, 0, sizeof(send_msg_));
-        send_msg_.msg_iov = send_iovecs_.data();
-        send_msg_.msg_iovlen = send_iovecs_.size();
+        std::memset(&send_op.msg, 0, sizeof(send_op.msg));
+        send_op.msg.msg_iov = send_op.iovecs.data();
+        send_op.msg.msg_iovlen = send_op.iovecs.size();
 
         ++pending_io_;
-        if (!ring_.PrepSendMsg(send_ev_, Fd(), &send_msg_, MSG_NOSIGNAL)) {
+        if (!ring_.PrepSendMsg(send_op, Fd(), &send_op.msg, MSG_NOSIGNAL)) {
             --pending_io_;
-            in_flight_bufs_.clear();
-            send_iovecs_.clear();
             obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_SEND_RESUME] partial send resume failed", Fd());
             Disconnect();
             return;
         }
+        active_send_ev_ = &send_op;
+        send_op.RetainAfterDispatch();
         ring_.Submit();
         return;
     }
 
-    in_flight_bufs_.clear();
-    send_iovecs_.clear();
-
     send_queue_.MarkSent();
-    if (send_queue_.DrainInto(in_flight_bufs_, kMaxSendIovecs) != 0) {
-        SendInFlightBatch();
+    std::vector<SendBufferRef> next_bufs;
+    if (send_queue_.DrainInto(next_bufs, kMaxSendIovecs) != 0) {
+        SendBatch(std::move(next_bufs));
         return;
     }
 
@@ -151,9 +149,12 @@ void Session::UpdateBackpressureState(std::size_t depth_hint,
 void Session::RegisterSend() {
     if (disconnecting_) return;
 
-    if (send_queue_.DrainInto(in_flight_bufs_, kMaxSendIovecs) == 0) return;
+    if (active_send_ev_ != nullptr) return;
 
-    SendInFlightBatch();
+    std::vector<SendBufferRef> bufs;
+    if (send_queue_.DrainInto(bufs, kMaxSendIovecs) == 0) return;
+
+    SendBatch(std::move(bufs));
 }
 
 void Session::AdvanceSendState(std::vector<struct iovec>& iovs,
@@ -178,34 +179,44 @@ void Session::AdvanceSendState(std::vector<struct iovec>& iovs,
 void Session::SendBatch(std::vector<SendBufferRef> bufs) {
     if (disconnecting_ || bufs.empty()) return;
 
-    in_flight_bufs_ = std::move(bufs);
-    SendInFlightBatch();
+    if (active_send_ev_ != nullptr) return;
+
+    auto* send_op = new (std::nothrow) SendOp();
+    if (!send_op) {
+        obs::LogError(kLogCategory, "Session[fd={}]: [DISC:OOM_SEND] SendOp allocation failed", Fd());
+        Disconnect();
+        return;
+    }
+    send_op->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
+    send_op->SetAutoDelete(true);
+    send_op->bufs = std::move(bufs);
+    SendInFlightBatch(*send_op);
 }
 
-void Session::SendInFlightBatch() {
-    if (disconnecting_ || in_flight_bufs_.empty()) return;
+void Session::SendInFlightBatch(SendOp& send_op) {
+    if (disconnecting_ || send_op.bufs.empty()) return;
 
-    auto& bufs = in_flight_bufs_;
-    send_iovecs_.resize(bufs.size());
+    auto& bufs = send_op.bufs;
+    send_op.iovecs.resize(bufs.size());
     for (std::size_t i = 0; i < bufs.size(); ++i) {
         auto data = bufs[i]->Data();
-        send_iovecs_[i].iov_base = const_cast<std::byte*>(data.data());
-        send_iovecs_[i].iov_len = data.size();
+        send_op.iovecs[i].iov_base = const_cast<std::byte*>(data.data());
+        send_op.iovecs[i].iov_len = data.size();
     }
 
-    std::memset(&send_msg_, 0, sizeof(send_msg_));
-    send_msg_.msg_iov = send_iovecs_.data();
-    send_msg_.msg_iovlen = send_iovecs_.size();
+    std::memset(&send_op.msg, 0, sizeof(send_op.msg));
+    send_op.msg.msg_iov = send_op.iovecs.data();
+    send_op.msg.msg_iovlen = send_op.iovecs.size();
 
     ++pending_io_;
-    if (!ring_.PrepSendMsg(send_ev_, Fd(), &send_msg_, MSG_NOSIGNAL)) {
+    if (!ring_.PrepSendMsg(send_op, Fd(), &send_op.msg, MSG_NOSIGNAL)) {
         --pending_io_;
-        in_flight_bufs_.clear();
-        send_iovecs_.clear();
+        delete &send_op;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_SEND] PrepSendMsg failed", Fd());
         Disconnect();
         return;
     }
+    active_send_ev_ = &send_op;
     ring_.Submit();
 }
 

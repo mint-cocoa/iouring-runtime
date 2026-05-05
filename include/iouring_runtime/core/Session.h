@@ -165,17 +165,20 @@ protected:
                                  bool hint_valid = false);
 
 private:
+    struct SendOp;
+
     bool CanDisconnectAfterFlush() const;
     bool DisconnectIfBackpressureExpired(std::chrono::steady_clock::time_point now);
     bool FlushPausedRecvBuffer();
     void RegisterRecv();
     void RegisterSend();
     void SendBatch(std::vector<SendBufferRef> bufs);
-    void SendInFlightBatch();
+    void SendInFlightBatch(SendOp& send_op);
     void ArmWatchdog();
     void OnRecv(ring::RecvEvent& ev, std::int32_t result, std::uint32_t flags) override;
     void OnSend(ring::SendEvent& ev, std::int32_t result) override;
     void OnDisconnect(ring::DisconnectEvent& ev, std::int32_t result) override;
+    void OnCancel(ring::CancelEvent& ev, std::int32_t result) override;
     void OnTimeout(ring::TimeoutEvent& ev, std::int32_t result) override;
 
     // Release self-ownership when all in-flight I/O has settled.
@@ -215,11 +218,11 @@ private:
     // Released only via TryRelease() after all in-flight ops complete.
     std::shared_ptr<Session> self_ref_;
 
-    // io_uring events — lifetime tied to Session
-    ring::RecvEvent recv_ev_;
-    ring::SendEvent send_ev_;
-    ring::DisconnectEvent disconnect_ev_;
-    ring::TimeoutEvent timeout_ev_;
+    // Active io_uring ops whose user_data points at heap operation contexts.
+    // The pointed-to objects own a strong Session reference and are deleted
+    // by IoRing after their final CQE.
+    ring::RecvEvent* active_recv_ev_ = nullptr;
+    ring::TimeoutEvent* active_timeout_ev_ = nullptr;
 
     // Inactivity watchdog — non-zero timeout activates it. last_activity_
     // is refreshed on each successful recv; on each timeout tick the
@@ -234,10 +237,13 @@ private:
     std::string remote_addr_;
     bool remote_addr_resolved_ = false;
 
-    // sendmsg state — must stay valid until CQE
-    struct msghdr send_msg_{};
-    std::vector<struct iovec> send_iovecs_;
-    std::vector<SendBufferRef> in_flight_bufs_;
+    struct SendOp final : ring::SendEvent {
+        struct msghdr msg{};
+        std::vector<struct iovec> iovecs;
+        std::vector<SendBufferRef> bufs;
+    };
+
+    SendOp* active_send_ev_ = nullptr;
 };
 
 } // namespace iouring_runtime::core::io

@@ -38,10 +38,11 @@ TEST(IoRingWrite, WritesToPipe) {
 
     constexpr std::string_view payload = "hello through io_uring write";
     auto observer = std::make_shared<WriteObserver>();
-    WriteEvent ev;
-    ev.SetOwner(observer);
+    auto* ev = new WriteEvent();
+    ev->SetStrongOwner(observer);
+    ev->SetAutoDelete(true);
 
-    ASSERT_TRUE(ring.PrepWrite(ev, fds[1], payload.data(),
+    ASSERT_TRUE(ring.PrepWrite(*ev, fds[1], payload.data(),
                                static_cast<unsigned>(payload.size()), 0));
     ASSERT_GE(ring.Submit(), 0);
     ring.Dispatch(std::chrono::milliseconds{500});

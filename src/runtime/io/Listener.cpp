@@ -77,14 +77,12 @@ std::expected<void, io::IoError> Listener::Start() {
     }
 
     listen_fd_.Reset(fd);
-    accept_ev_.SetOwner(shared_from_this());
 
     obs::LogInfo(kLogCategory, "Listener: listening on {}:{}", addr_.host, addr_.port);
-    if (!ring_.PrepAcceptMultishot(accept_ev_, listen_fd_.Get())) {
+    if (!RegisterAccept()) {
         obs::LogError(kLogCategory, "Listener: PrepAcceptMultishot failed (SQE full)");
         return std::unexpected(IoError::kListenFailed);
     }
-    ring_.Submit();
     return {};
 }
 
@@ -92,8 +90,32 @@ void Listener::Stop() {
     listen_fd_.Reset();
 }
 
+bool Listener::RegisterAccept() {
+    if (!listen_fd_.Valid() || active_accept_ev_ != nullptr) {
+        return false;
+    }
+
+    auto* accept_ev = new (std::nothrow) ring::AcceptEvent();
+    if (!accept_ev) {
+        return false;
+    }
+    accept_ev->SetStrongOwner(shared_from_this());
+    accept_ev->SetAutoDelete(true);
+    if (!ring_.PrepAcceptMultishot(*accept_ev, listen_fd_.Get())) {
+        delete accept_ev;
+        return false;
+    }
+    active_accept_ev_ = accept_ev;
+    ring_.Submit();
+    return true;
+}
+
 void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t flags) {
     ZoneScoped;
+    const bool more = (flags & IORING_CQE_F_MORE) != 0;
+    if (!more) {
+        active_accept_ev_ = nullptr;
+    }
 
     if (result < 0) {
         if (result == -ECANCELED)
@@ -102,9 +124,7 @@ void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t f
             obs::LogError(kLogCategory, "Listener: accept error {}", result);
         // Multishot may have been cancelled, re-register
         if (listen_fd_.Valid()) {
-            if (ring_.PrepAcceptMultishot(accept_ev_, listen_fd_.Get()))
-                ring_.Submit();
-            else
+            if (!RegisterAccept())
                 obs::LogError(kLogCategory, "Listener: re-register accept failed (SQE full)");
         }
         return;
@@ -113,10 +133,8 @@ void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t f
     OnAccept(result);
 
     // If CQE_F_MORE not set, multishot accept ended -> re-register
-    if (!(flags & IORING_CQE_F_MORE) && listen_fd_.Valid()) {
-        if (ring_.PrepAcceptMultishot(accept_ev_, listen_fd_.Get()))
-            ring_.Submit();
-        else
+    if (!more && listen_fd_.Valid()) {
+        if (!RegisterAccept())
             obs::LogError(kLogCategory, "Listener: re-register accept failed (SQE full)");
     }
 }

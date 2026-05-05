@@ -43,6 +43,7 @@ protected:
     void OnAccept(ring::AcceptEvent& ev, std::int32_t result, std::uint32_t flags) override;
 
 private:
+    bool RegisterAccept();
     void OnAccept(int client_fd);
 
     IoRing& ring_;
@@ -50,7 +51,7 @@ private:
     Address addr_;
     SocketHandle listen_fd_;
     SessionFactory factory_;
-    ring::AcceptEvent accept_ev_;
+    ring::AcceptEvent* active_accept_ev_ = nullptr;
     ContextId shard_id_;
     std::uint32_t max_sessions_;  // 0 = unlimited
     SessionCountFn session_count_fn_;
