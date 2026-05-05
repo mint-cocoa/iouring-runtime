@@ -166,6 +166,7 @@ protected:
 
 private:
     struct SendOp;
+    struct SendOpPool;
 
     bool CanDisconnectAfterFlush() const;
     bool DisconnectIfBackpressureExpired(std::chrono::steady_clock::time_point now);
@@ -174,6 +175,9 @@ private:
     void RegisterSend();
     void SendBatch(std::vector<SendBufferRef> bufs);
     void SendInFlightBatch(SendOp& send_op);
+    static SendOpPool& SendOpPoolForThread();
+    static SendOp* AcquireSendOp();
+    static void ReleaseSendOp(SendOp* send_op) noexcept;
     void ArmWatchdog();
     void OnRecv(ring::RecvEvent& ev, std::int32_t result, std::uint32_t flags) override;
     void OnSend(ring::SendEvent& ev, std::int32_t result) override;
@@ -241,6 +245,8 @@ private:
         struct msghdr msg{};
         std::vector<struct iovec> iovecs;
         std::vector<SendBufferRef> bufs;
+
+        void Destroy() noexcept override;
     };
 
     SendOp* active_send_ev_ = nullptr;

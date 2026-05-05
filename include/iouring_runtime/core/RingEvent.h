@@ -36,6 +36,7 @@ public:
     virtual ~IoEvent() = default;
 
     virtual void Init() { strong_owner_.reset(); }
+    virtual void Destroy() noexcept { delete this; }
     virtual bool Complete(std::int32_t /*result*/, std::uint32_t /*flags*/) const {
         return true;
     }
