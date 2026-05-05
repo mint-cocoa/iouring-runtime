@@ -5,7 +5,6 @@
 #include <iouring_runtime/observability/Logging.h>
 
 #include <cstring>
-#include <memory>
 
 namespace obs = iouring_runtime::observability;
 namespace {
@@ -16,47 +15,6 @@ namespace iouring_runtime::core::io {
 
 namespace {
 constexpr std::size_t kMaxSendIovecs = 1024;
-}
-
-struct Session::SendOpPool {
-    std::vector<std::unique_ptr<SendOp>> storage;
-    std::vector<SendOp*> free;
-};
-
-Session::SendOpPool& Session::SendOpPoolForThread() {
-    thread_local SendOpPool pool;
-    return pool;
-}
-
-Session::SendOp* Session::AcquireSendOp() {
-    auto& pool = SendOpPoolForThread();
-    if (!pool.free.empty()) {
-        auto* op = pool.free.back();
-        pool.free.pop_back();
-        return op;
-    }
-
-    auto op = std::make_unique<SendOp>();
-    auto* raw = op.get();
-    pool.storage.push_back(std::move(op));
-    return raw;
-}
-
-void Session::ReleaseSendOp(SendOp* send_op) noexcept {
-    if (!send_op) {
-        return;
-    }
-
-    send_op->msg = {};
-    send_op->iovecs.clear();
-    send_op->bufs.clear();
-    send_op->SetStrongOwner({});
-    send_op->SetAutoDelete(false);
-    SendOpPoolForThread().free.push_back(send_op);
-}
-
-void Session::SendOp::Destroy() noexcept {
-    Session::ReleaseSendOp(this);
 }
 
 std::expected<void, io::IoError> Session::Send(buffer::SendBufferRef buf) {
@@ -223,7 +181,7 @@ void Session::SendBatch(std::vector<SendBufferRef> bufs) {
 
     if (active_send_ev_ != nullptr) return;
 
-    auto* send_op = AcquireSendOp();
+    auto* send_op = new (std::nothrow) SendOp();
     if (!send_op) {
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:OOM_SEND] SendOp allocation failed", Fd());
         Disconnect();
@@ -253,7 +211,7 @@ void Session::SendInFlightBatch(SendOp& send_op) {
     ++pending_io_;
     if (!ring_.PrepSendMsg(send_op, Fd(), &send_op.msg, MSG_NOSIGNAL)) {
         --pending_io_;
-        ReleaseSendOp(&send_op);
+        delete &send_op;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_SEND] PrepSendMsg failed", Fd());
         Disconnect();
         return;

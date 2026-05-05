@@ -175,7 +175,7 @@ bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
                     owner->Dispatch(ev, result, flags);
                 }
                 if (ev->ShouldDeleteAfterDispatch(result, flags)) {
-                    ev->Destroy();
+                    delete ev;
                 }
             }
 
