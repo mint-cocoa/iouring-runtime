@@ -2,6 +2,7 @@
 
 #include "AcmeChallengeSession.h"
 
+#include <iouring_runtime/core/SessionControl.h>
 #include <iouring_runtime/core/Worker.h>
 #include <iouring_runtime/observability/Logging.h>
 
@@ -38,7 +39,8 @@ void AcmeHttpChallengeServer::Start() {
             auto session = detail::CreateAcmeChallengeSession(
                 fd, ring, pool, config_.webroot,
                 config_.send_queue_max_pending);
-            session->SetInactivityTimeout(config_.inactivity_timeout);
+            core::io::SessionControl::SetInactivityTimeout(
+                *session, config_.inactivity_timeout);
             return session;
         };
 

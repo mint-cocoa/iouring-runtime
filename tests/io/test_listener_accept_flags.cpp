@@ -78,6 +78,10 @@ TEST(ListenerAcceptFlags, AcceptedSocketsAreNonBlocking) {
     EXPECT_NE(accepted_flags.load(std::memory_order_relaxed) & O_NONBLOCK, 0);
 
     listener->Stop();
+    listener.reset();
+    for (int i = 0; i < 8; ++i) {
+        ring->Dispatch(10ms);
+    }
     ::close(client_fd);
     IoRing::SetCurrent(nullptr);
 }

@@ -5,6 +5,8 @@
 
 #include <chrono>
 #include <cerrno>
+#include <memory>
+#include <thread>
 
 using namespace iouring_runtime::core::ring;
 using namespace std::chrono_literals;
@@ -24,6 +26,52 @@ protected:
     }
 };
 
+struct OwnerLifetimeState {
+    int timeout_callbacks = 0;
+    int cancel_callbacks = 0;
+    int destroyed = 0;
+    bool in_callback = false;
+    bool destroyed_during_callback = false;
+};
+
+class OwnerLifetimeObserver : public EventHandler {
+public:
+    OwnerLifetimeObserver(std::shared_ptr<OwnerLifetimeState> state,
+                          bool clear_first_timeout_owner)
+        : state_(std::move(state))
+        , clear_first_timeout_owner_(clear_first_timeout_owner) {}
+
+    ~OwnerLifetimeObserver() override {
+        if (state_->in_callback) {
+            state_->destroyed_during_callback = true;
+        }
+        ++state_->destroyed;
+    }
+
+protected:
+    void OnTimeout(TimeoutEvent& ev, std::int32_t result) override {
+        state_->in_callback = true;
+        ++state_->timeout_callbacks;
+        if (clear_first_timeout_owner_ && state_->timeout_callbacks == 1) {
+            ev.SetStrongOwner({});
+            EXPECT_EQ(state_->destroyed, 0)
+                << "dispatch-local owner should keep handler alive";
+        }
+        EXPECT_TRUE(result == -ETIME || result == -ECANCELED);
+        state_->in_callback = false;
+    }
+
+    void OnCancel(CancelEvent& /*ev*/, std::int32_t /*result*/) override {
+        state_->in_callback = true;
+        ++state_->cancel_callbacks;
+        state_->in_callback = false;
+    }
+
+private:
+    std::shared_ptr<OwnerLifetimeState> state_;
+    bool clear_first_timeout_owner_;
+};
+
 } // namespace
 
 TEST(IoRingTimeout, FiresEtimeAtRequestedDuration) {
@@ -33,8 +81,7 @@ TEST(IoRingTimeout, FiresEtimeAtRequestedDuration) {
     IoRing::SetCurrent(&ring);
 
     auto obs = std::make_shared<TimeoutObserver>();
-    auto* ev = new TimeoutEvent();
-    ev->SetStrongOwner(obs);
+    auto* ev = new StrongTimeoutEvent(obs);
     ev->SetAutoDelete(true);
 
     auto start = std::chrono::steady_clock::now();
@@ -61,8 +108,7 @@ TEST(IoRingTimeout, CancellationReportsEcanceled) {
     IoRing::SetCurrent(&ring);
 
     auto obs = std::make_shared<TimeoutObserver>();
-    auto* ev = new TimeoutEvent();
-    ev->SetStrongOwner(obs);
+    auto* ev = new StrongTimeoutEvent(obs);
     ev->SetAutoDelete(true);
 
     // Arm a long timeout, then immediately cancel it. The CQE should arrive
@@ -91,8 +137,7 @@ TEST(IoRingTimeout, DispatchFlushesDeferredSubmissions) {
     IoRing::SetCurrent(&ring);
 
     auto obs = std::make_shared<TimeoutObserver>();
-    auto* ev = new TimeoutEvent();
-    ev->SetStrongOwner(obs);
+    auto* ev = new StrongTimeoutEvent(obs);
     ev->SetAutoDelete(true);
 
     ASSERT_TRUE(ring.PrepTimeout(*ev, 10ms));
@@ -117,10 +162,8 @@ TEST(IoRingTimeout, DispatchHonorsCqeBatchBudgetAcrossPolls) {
 
     auto first = std::make_shared<TimeoutObserver>();
     auto second = std::make_shared<TimeoutObserver>();
-    auto* first_ev = new TimeoutEvent();
-    auto* second_ev = new TimeoutEvent();
-    first_ev->SetStrongOwner(first);
-    second_ev->SetStrongOwner(second);
+    auto* first_ev = new StrongTimeoutEvent(first);
+    auto* second_ev = new StrongTimeoutEvent(second);
     first_ev->SetAutoDelete(true);
     second_ev->SetAutoDelete(true);
 
@@ -138,6 +181,92 @@ TEST(IoRingTimeout, DispatchHonorsCqeBatchBudgetAcrossPolls) {
     EXPECT_TRUE(second->fired);
     EXPECT_EQ(first->last_result, -ETIME);
     EXPECT_EQ(second->last_result, -ETIME);
+
+    IoRing::SetCurrent(nullptr);
+}
+
+TEST(IoRingOwnerLifetime, DispatchLocalOwnerSurvivesEventOwnerReset) {
+    auto ring_result = IoRing::Create();
+    ASSERT_TRUE(ring_result.has_value());
+    auto& ring = *ring_result.value();
+    IoRing::SetCurrent(&ring);
+
+    auto state = std::make_shared<OwnerLifetimeState>();
+    auto observer = std::make_shared<OwnerLifetimeObserver>(state, true);
+    auto* ev = new StrongTimeoutEvent(observer);
+    ev->SetAutoDelete(true);
+    observer.reset();
+
+    ASSERT_TRUE(ring.PrepTimeout(*ev, 1ms));
+    ASSERT_GE(ring.Submit(), 0);
+    ring.Dispatch(200ms);
+
+    EXPECT_EQ(state->timeout_callbacks, 1);
+    EXPECT_EQ(state->cancel_callbacks, 0);
+    EXPECT_FALSE(state->destroyed_during_callback);
+    EXPECT_EQ(state->destroyed, 1);
+
+    IoRing::SetCurrent(nullptr);
+}
+
+TEST(IoRingOwnerLifetime, ReadyCqesUseIndependentEventOwners) {
+    auto ring_result = IoRing::Create();
+    ASSERT_TRUE(ring_result.has_value());
+    auto& ring = *ring_result.value();
+    IoRing::SetCurrent(&ring);
+
+    auto state = std::make_shared<OwnerLifetimeState>();
+    auto observer = std::make_shared<OwnerLifetimeObserver>(state, true);
+    auto* first_ev = new StrongTimeoutEvent(observer);
+    auto* second_ev = new StrongTimeoutEvent(observer);
+    first_ev->SetAutoDelete(true);
+    second_ev->SetAutoDelete(true);
+    observer.reset();
+
+    ASSERT_TRUE(ring.PrepTimeout(*first_ev, 1ms));
+    ASSERT_TRUE(ring.PrepTimeout(*second_ev, 1ms));
+    ASSERT_GE(ring.Submit(), 0);
+
+    std::this_thread::sleep_for(20ms);
+    ring.Dispatch(200ms);
+
+    EXPECT_EQ(state->timeout_callbacks, 2);
+    EXPECT_EQ(state->cancel_callbacks, 0);
+    EXPECT_FALSE(state->destroyed_during_callback);
+    EXPECT_EQ(state->destroyed, 1);
+
+    IoRing::SetCurrent(nullptr);
+}
+
+TEST(IoRingOwnerLifetime, CancelRequestAndTargetHaveIndependentOwners) {
+    auto ring_result = IoRing::Create();
+    ASSERT_TRUE(ring_result.has_value());
+    auto& ring = *ring_result.value();
+    IoRing::SetCurrent(&ring);
+
+    auto state = std::make_shared<OwnerLifetimeState>();
+    auto observer = std::make_shared<OwnerLifetimeObserver>(state, false);
+    auto* timeout_ev = new StrongTimeoutEvent(observer);
+    auto* cancel_ev = new StrongCancelEvent(observer, timeout_ev);
+    timeout_ev->SetAutoDelete(true);
+    cancel_ev->SetAutoDelete(true);
+    observer.reset();
+
+    ASSERT_TRUE(ring.PrepTimeout(*timeout_ev, 10s));
+    ASSERT_GE(ring.Submit(), 0);
+    ASSERT_TRUE(ring.PrepCancel(*timeout_ev, cancel_ev));
+    ASSERT_GE(ring.Submit(), 0);
+
+    auto deadline = std::chrono::steady_clock::now() + 1s;
+    while ((state->timeout_callbacks != 1 || state->cancel_callbacks != 1) &&
+           std::chrono::steady_clock::now() < deadline) {
+        ring.Dispatch(100ms);
+    }
+
+    EXPECT_EQ(state->timeout_callbacks, 1);
+    EXPECT_EQ(state->cancel_callbacks, 1);
+    EXPECT_FALSE(state->destroyed_during_callback);
+    EXPECT_EQ(state->destroyed, 1);
 
     IoRing::SetCurrent(nullptr);
 }

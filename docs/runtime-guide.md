@@ -75,7 +75,7 @@ private:
     }
 
     void OnConnected() override {
-        std::cout << "client connected: " << RemoteAddr() << "\n";
+        std::cout << "client connected on fd " << Fd() << "\n";
     }
 
     void OnDisconnected() override {
@@ -139,21 +139,12 @@ hooks.tick = [&global_queue](iouring_runtime::core::io::Worker&) {
 Lower-level code can still build directly from `IoRing`, `BufferPool`, and
 `Listener` when it needs full control.
 
-## Add Idle Timeouts
+## Keep Core Thin
 
-Use `core_idle_echo` as the reference for inactivity handling:
-
-```bash
-CORE_IDLE_ECHO_PORT=19091 \
-CORE_IDLE_TIMEOUT_MS=5000 \
-./build-core/bin/core_idle_echo
-```
-
-Useful hooks:
-
-- `OnTimeoutTick(...)`
-- `HasPendingAppWork()`
-- `DisconnectAfterFlush()`
+Core `Session` only owns socket I/O, send/recv dispatch, disconnect, and
+operation drain. Higher-level policies such as inactivity deadlines, graceful
+flush-close, backpressure, peer address formatting, and application work
+tracking should live in protocol modules or application code.
 
 ## When To Use A Higher Module
 

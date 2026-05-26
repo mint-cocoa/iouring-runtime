@@ -41,6 +41,7 @@ public:
 
 protected:
     void OnAccept(ring::AcceptEvent& ev, std::int32_t result, std::uint32_t flags) override;
+    void OnCancel(ring::CancelEvent& ev, std::int32_t result) override;
 
 private:
     bool RegisterAccept();
@@ -52,6 +53,7 @@ private:
     SocketHandle listen_fd_;
     SessionFactory factory_;
     ring::AcceptEvent* active_accept_ev_ = nullptr;
+    bool accept_cancel_requested_ = false;
     ContextId shard_id_;
     std::uint32_t max_sessions_;  // 0 = unlimited
     SessionCountFn session_count_fn_;

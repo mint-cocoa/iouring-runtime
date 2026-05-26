@@ -42,13 +42,12 @@ std::expected<void, core::io::IoError> ProxyConnector::Start() {
     }
     socket_.Reset(fd);
 
-    auto* connect_ev = new (std::nothrow) core::ring::ConnectEvent();
+    auto* connect_ev = new (std::nothrow) core::ring::StrongConnectEvent(self);
     if (!connect_ev) {
         socket_.Reset();
         self_ref_.reset();
         return std::unexpected(core::io::IoError::kConnectionRefused);
     }
-    connect_ev->SetStrongOwner(self);
     connect_ev->SetAutoDelete(true);
 
     ++pending_ops_;
@@ -66,9 +65,8 @@ std::expected<void, core::io::IoError> ProxyConnector::Start() {
     active_connect_ev_ = connect_ev;
 
     if (config_.timeouts.connect.count() > 0) {
-        auto* timeout_ev = new (std::nothrow) core::ring::TimeoutEvent();
+        auto* timeout_ev = new (std::nothrow) core::ring::StrongTimeoutEvent(self);
         if (timeout_ev) {
-            timeout_ev->SetStrongOwner(self);
             timeout_ev->SetAutoDelete(true);
         }
         if (timeout_ev && ring_.PrepTimeout(*timeout_ev, config_.timeouts.connect)) {
@@ -94,9 +92,10 @@ void ProxyConnector::Cancel() {
     socket_.Reset();
 
     if (connect_pending_ && active_connect_ev_) {
-        auto* cancel_ev = new (std::nothrow) core::ring::CancelEvent(active_connect_ev_);
+        auto* cancel_ev = new (std::nothrow) core::ring::StrongCancelEvent(
+            std::static_pointer_cast<ProxyConnector>(shared_from_this()),
+            active_connect_ev_);
         if (cancel_ev) {
-            cancel_ev->SetStrongOwner(std::static_pointer_cast<ProxyConnector>(shared_from_this()));
             cancel_ev->SetAutoDelete(true);
             if (ring_.PrepCancel(*active_connect_ev_, cancel_ev)) {
                 ++pending_ops_;
@@ -104,9 +103,10 @@ void ProxyConnector::Cancel() {
         }
     }
     if (timeout_armed_ && active_timeout_ev_) {
-        auto* cancel_ev = new (std::nothrow) core::ring::CancelEvent(active_timeout_ev_);
+        auto* cancel_ev = new (std::nothrow) core::ring::StrongCancelEvent(
+            std::static_pointer_cast<ProxyConnector>(shared_from_this()),
+            active_timeout_ev_);
         if (cancel_ev) {
-            cancel_ev->SetStrongOwner(std::static_pointer_cast<ProxyConnector>(shared_from_this()));
             cancel_ev->SetAutoDelete(true);
             if (ring_.PrepCancel(*active_timeout_ev_, cancel_ev)) {
                 ++pending_ops_;
@@ -133,9 +133,10 @@ void ProxyConnector::OnConnect(core::ring::ConnectEvent& ev, std::int32_t result
     }
 
     if (timeout_armed_ && active_timeout_ev_) {
-        auto* cancel_ev = new (std::nothrow) core::ring::CancelEvent(active_timeout_ev_);
+        auto* cancel_ev = new (std::nothrow) core::ring::StrongCancelEvent(
+            std::static_pointer_cast<ProxyConnector>(shared_from_this()),
+            active_timeout_ev_);
         if (cancel_ev) {
-            cancel_ev->SetStrongOwner(std::static_pointer_cast<ProxyConnector>(shared_from_this()));
             cancel_ev->SetAutoDelete(true);
             if (ring_.PrepCancel(*active_timeout_ev_, cancel_ev)) {
                 ++pending_ops_;
@@ -159,9 +160,6 @@ void ProxyConnector::OnConnect(core::ring::ConnectEvent& ev, std::int32_t result
         socket_.Release(), ring_, pool_, bridge_, PeerRole::kUpstream,
         config_.backpressure.send_queue_max_pending);
     ConfigureProxySession(upstream, worker_, config_);
-    if (worker_.io_worker) {
-        worker_.io_worker->TrackSession(upstream);
-    }
     upstream->Start();
     bridge_->AttachUpstream(ToProxyPeer(upstream));
 
@@ -194,9 +192,10 @@ void ProxyConnector::OnTimeout(core::ring::TimeoutEvent& ev, std::int32_t result
     socket_.Reset();
 
     if (connect_pending_ && active_connect_ev_) {
-        auto* cancel_ev = new (std::nothrow) core::ring::CancelEvent(active_connect_ev_);
+        auto* cancel_ev = new (std::nothrow) core::ring::StrongCancelEvent(
+            std::static_pointer_cast<ProxyConnector>(shared_from_this()),
+            active_connect_ev_);
         if (cancel_ev) {
-            cancel_ev->SetStrongOwner(std::static_pointer_cast<ProxyConnector>(shared_from_this()));
             cancel_ev->SetAutoDelete(true);
             if (ring_.PrepCancel(*active_connect_ev_, cancel_ev)) {
                 ++pending_ops_;

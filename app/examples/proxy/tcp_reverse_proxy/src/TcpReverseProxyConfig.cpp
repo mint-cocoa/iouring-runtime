@@ -396,6 +396,24 @@ AppConfig LoadConfigFromEnv() {
         ReadUnsignedEnv<std::uint32_t>("TCP_PROXY_SEND_QUEUE_LOW_WATERMARK",
                                        config.backpressure
                                            .send_queue_low_watermark);
+    config.backpressure.send_queue_high_bytes =
+        ReadUnsignedEnv<std::size_t>("TCP_PROXY_SEND_QUEUE_HIGH_BYTES",
+                                     config.backpressure
+                                         .send_queue_high_bytes);
+    config.backpressure.send_queue_low_bytes =
+        ReadUnsignedEnv<std::size_t>("TCP_PROXY_SEND_QUEUE_LOW_BYTES",
+                                     config.backpressure
+                                         .send_queue_low_bytes);
+    if (config.backpressure.send_queue_high_bytes != 0 &&
+        config.backpressure.send_queue_low_bytes >
+            config.backpressure.send_queue_high_bytes) {
+        config.backpressure.send_queue_low_bytes =
+            config.backpressure.send_queue_high_bytes;
+    }
+    config.backpressure.paused_recv_byte_limit =
+        ReadUnsignedEnv<std::size_t>("TCP_PROXY_PAUSED_RECV_BYTE_LIMIT",
+                                     config.backpressure
+                                         .paused_recv_byte_limit);
     config.backpressure.disconnect_on_high_watermark =
         ReadUnsignedEnv<std::uint32_t>(
             "TCP_PROXY_DISCONNECT_ON_HIGH_WATERMARK", 0) != 0;

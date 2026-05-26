@@ -26,13 +26,7 @@ public:
                           std::uint32_t send_queue_max_pending)
         : Session(fd, ring, pool, send_queue_max_pending)
         , bridge_(std::move(bridge))
-        , role_(role) {
-        auto bridge_ref = bridge_;
-        SetBackpressureCallback(
-            [bridge_ref, role_ = role_](core::io::SessionRef, bool active) {
-                bridge_ref->OnPeerBackpressure(role_, active);
-            });
-    }
+        , role_(role) {}
 
     bool SendProxyPayload(std::span<const std::byte> data) final {
         auto buffer_result = CopyToSendBuffer(Pool(), data);
@@ -79,6 +73,10 @@ protected:
         bridge_->OnPeerDisconnected(role_);
     }
 
+    void OnBackpressure(bool active) final {
+        bridge_->OnPeerBackpressure(role_, active);
+    }
+
 private:
     std::shared_ptr<ProxyBridge> bridge_;
     PeerRole role_;
@@ -101,11 +99,6 @@ public:
         , role_(role)
         , pending_plaintext_limit_(pending_plaintext_limit)
         , ssl_(nullptr, &SSL_free) {
-        auto bridge_ref = bridge_;
-        SetBackpressureCallback(
-            [bridge_ref, role_ = role_](core::io::SessionRef, bool active) {
-                bridge_ref->OnPeerBackpressure(role_, active);
-            });
         InitializeSsl();
     }
 
@@ -172,6 +165,10 @@ protected:
         if (!FlushPendingPlaintext()) {
             Disconnect();
         }
+    }
+
+    void OnBackpressure(bool active) final {
+        bridge_->OnPeerBackpressure(role_, active);
     }
 
 private:

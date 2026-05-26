@@ -105,6 +105,7 @@ IoRing::IoRing(io_uring* ring, std::unique_ptr<RingBuffer> br,
 }
 
 IoRing::~IoRing() {
+    session_manager_.Clear();
     buf_ring_.reset();
     if (wake_fd_ >= 0) {
         ::close(wake_fd_);
@@ -143,11 +144,6 @@ bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
         return false;
     }
 
-    // Keep all owners alive during the entire CQE batch to prevent
-    // use-after-free when a disconnect CQE triggers Session destruction
-    // whose recv/send events are still referenced by later CQEs in the batch.
-    std::vector<EventHandlerRef> keep_alive;
-
     unsigned head = 0;
     unsigned count = 0;
     {
@@ -169,10 +165,11 @@ bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
                 }
             } else if (data != 0) {
                 auto* ev = reinterpret_cast<IoEvent*>(data);
-                auto owner = ev->Owner();
-                if (owner) {
-                    keep_alive.push_back(owner);
-                    owner->Dispatch(ev, result, flags);
+                auto owner_ptr = ev->Owner();
+                if (owner_ptr) {
+                    // Hold the handler through this callback. Submitted
+                    // heap events keep their owner alive until final dispatch.
+                    owner_ptr->Dispatch(ev, result, flags);
                 }
                 if (ev->ShouldDeleteAfterDispatch(result, flags)) {
                     delete ev;

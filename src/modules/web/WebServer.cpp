@@ -1,5 +1,6 @@
 #include <iouring_runtime/web/WebServer.h>
 
+#include <iouring_runtime/core/SessionControl.h>
 #include <iouring_runtime/web/HttpSession.h>
 
 #include <iouring_runtime/observability/Logging.h>
@@ -101,20 +102,28 @@ void WebServer::Start() {
                 fd, ring, pool, *router, backpressure.send_queue_max_pending,
                 parser_options, timeouts.request,
                 observability.slow_request_threshold);
-            session->SetSessionId(raw_worker->next_session_id.fetch_add(
-                1, std::memory_order_relaxed));
-            session->SetInactivityTimeout(timeouts.inactivity);
-            session->SetBackpressureWatermarks(
+            core::io::SessionControl::SetSessionId(
+                *session,
+                raw_worker->next_session_id.fetch_add(
+                    1, std::memory_order_relaxed));
+            core::io::SessionControl::SetInactivityTimeout(
+                *session, timeouts.inactivity);
+            core::io::SessionControl::SetBackpressureWatermarks(
+                *session,
                 backpressure.send_queue_high_watermark,
                 backpressure.send_queue_low_watermark);
-            session->SetBackpressureByteWatermarks(
+            core::io::SessionControl::SetBackpressureByteWatermarks(
+                *session,
                 backpressure.send_queue_high_bytes,
                 backpressure.send_queue_low_bytes);
-            session->SetPauseRecvOnBackpressure(
+            core::io::SessionControl::SetPauseRecvOnBackpressure(
+                *session,
                 backpressure.pause_recv_on_high_watermark);
-            session->SetBackpressureDisconnectDelay(
+            core::io::SessionControl::SetBackpressureDisconnectDelay(
+                *session,
                 backpressure.disconnect_after);
-            session->SetDisconnectOnHighWatermark(
+            core::io::SessionControl::SetDisconnectOnHighWatermark(
+                *session,
                 backpressure.disconnect_on_high_watermark);
             return session;
         };

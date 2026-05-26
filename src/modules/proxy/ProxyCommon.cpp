@@ -1,6 +1,7 @@
 #include "ProxyCommon.h"
 
 #include <iouring_runtime/core/IoRing.h>
+#include <iouring_runtime/core/SessionControl.h>
 
 #include <cstring>
 
@@ -12,20 +13,30 @@ TcpProxyWorker::TcpProxyWorker()
 void ConfigureProxySession(const core::io::SessionRef& session,
                            TcpProxyWorker& worker,
                            const TcpProxyConfig& config) {
-    session->SetSessionId(worker.next_session_id.fetch_add(
-        1, std::memory_order_relaxed));
-    session->SetInactivityTimeout(config.timeouts.inactivity);
-    session->SetBackpressureWatermarks(
+    core::io::SessionControl::SetSessionId(
+        *session,
+        worker.next_session_id.fetch_add(1, std::memory_order_relaxed));
+    core::io::SessionControl::SetInactivityTimeout(
+        *session, config.timeouts.inactivity);
+    core::io::SessionControl::SetBackpressureWatermarks(
+        *session,
         config.backpressure.send_queue_high_watermark,
         config.backpressure.send_queue_low_watermark);
-    session->SetBackpressureByteWatermarks(
+    core::io::SessionControl::SetBackpressureByteWatermarks(
+        *session,
         config.backpressure.send_queue_high_bytes,
         config.backpressure.send_queue_low_bytes);
-    session->SetPauseRecvOnBackpressure(
+    core::io::SessionControl::SetPauseRecvOnBackpressure(
+        *session,
         config.backpressure.pause_recv_on_high_watermark);
-    session->SetBackpressureDisconnectDelay(
+    core::io::SessionControl::SetPausedRecvByteLimit(
+        *session,
+        config.backpressure.paused_recv_byte_limit);
+    core::io::SessionControl::SetBackpressureDisconnectDelay(
+        *session,
         config.backpressure.disconnect_after);
-    session->SetDisconnectOnHighWatermark(
+    core::io::SessionControl::SetDisconnectOnHighWatermark(
+        *session,
         config.backpressure.disconnect_on_high_watermark);
 }
 

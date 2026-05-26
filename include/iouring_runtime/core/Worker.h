@@ -10,9 +10,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 namespace iouring_runtime::core::io {
@@ -53,7 +51,6 @@ public:
 
     void AddListener(Address address, SessionFactory factory,
                      std::uint32_t max_sessions = 0);
-    void TrackSession(const SessionRef& session);
     void StopAccepting();
     void DrainSessions(bool force_close);
     bool WaitForZeroSessions(std::chrono::milliseconds timeout) const;
@@ -92,9 +89,6 @@ private:
     std::atomic<bool> running_{false};
     std::thread::id thread_id_{};
 
-    std::atomic<std::size_t> live_sessions_{0};
-    mutable std::mutex sessions_mu_;
-    std::unordered_map<Session*, SessionRef> sessions_;
 };
 
 } // namespace iouring_runtime::core::io

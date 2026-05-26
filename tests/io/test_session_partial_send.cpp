@@ -1,4 +1,5 @@
 #include <iouring_runtime/core/Session.h>
+#include <iouring_runtime/core/SessionDetail.h>
 #include <iouring_runtime/core/SendBuffer.h>
 #include <iouring_runtime/core/SendQueue.h>
 
@@ -66,7 +67,7 @@ TEST_F(PartialSendFixture, AdvanceZeroLeavesStateUnchanged) {
     PushBuffer(20, std::byte{0xBB});
     auto before = View(iovs);
 
-    Session::AdvanceSendState(iovs, bufs, 0);
+    detail::AdvanceSendState(iovs, bufs, 0);
 
     EXPECT_EQ(iovs.size(), 2u);
     EXPECT_EQ(bufs.size(), 2u);
@@ -83,7 +84,7 @@ TEST_F(PartialSendFixture, AdvanceWithinFirstIovec) {
     const std::byte* original_first = static_cast<const std::byte*>(iovs[0].iov_base);
     const std::byte* original_second = static_cast<const std::byte*>(iovs[1].iov_base);
 
-    Session::AdvanceSendState(iovs, bufs, 3);
+    detail::AdvanceSendState(iovs, bufs, 3);
 
     ASSERT_EQ(iovs.size(), 2u);
     ASSERT_EQ(bufs.size(), 2u);
@@ -99,7 +100,7 @@ TEST_F(PartialSendFixture, AdvanceExactlyFirstIovecDropsIt) {
     const std::byte* second_origin = static_cast<const std::byte*>(iovs[1].iov_base);
     std::weak_ptr<SendBuffer> first_weak = bufs[0];
 
-    Session::AdvanceSendState(iovs, bufs, 10);
+    detail::AdvanceSendState(iovs, bufs, 10);
 
     ASSERT_EQ(iovs.size(), 1u);
     ASSERT_EQ(bufs.size(), 1u);
@@ -117,7 +118,7 @@ TEST_F(PartialSendFixture, AdvanceAcrossMultipleIovecs) {
     std::weak_ptr<SendBuffer> second_weak = bufs[1];
 
     // Consume all of iov[0] (10), all of iov[1] (20), and 5 bytes of iov[2].
-    Session::AdvanceSendState(iovs, bufs, 35);
+    detail::AdvanceSendState(iovs, bufs, 35);
 
     ASSERT_EQ(iovs.size(), 1u);
     ASSERT_EQ(bufs.size(), 1u);
@@ -133,7 +134,7 @@ TEST_F(PartialSendFixture, AdvanceBySumEmptiesBothVectors) {
     std::weak_ptr<SendBuffer> first_weak = bufs[0];
     std::weak_ptr<SendBuffer> second_weak = bufs[1];
 
-    Session::AdvanceSendState(iovs, bufs, 30);
+    detail::AdvanceSendState(iovs, bufs, 30);
 
     EXPECT_TRUE(iovs.empty());
     EXPECT_TRUE(bufs.empty());
@@ -142,34 +143,34 @@ TEST_F(PartialSendFixture, AdvanceBySumEmptiesBothVectors) {
 }
 
 TEST(SessionDisconnectClassificationTest, TreatsPeerCloseAsExpectedDisconnect) {
-    EXPECT_TRUE(Session::IsExpectedDisconnectResult(0));
-    EXPECT_EQ(Session::DisconnectReasonForResult(0), std::string_view("PEER_CLOSE"));
+    EXPECT_TRUE(detail::IsExpectedDisconnectResult(0));
+    EXPECT_EQ(detail::DisconnectReasonForResult(0), std::string_view("PEER_CLOSE"));
 }
 
 TEST(SessionDisconnectClassificationTest, TreatsCommonClientShutdownErrorsAsExpected) {
-    EXPECT_TRUE(Session::IsExpectedDisconnectResult(-ECONNRESET));
-    EXPECT_EQ(Session::DisconnectReasonForResult(-ECONNRESET),
+    EXPECT_TRUE(detail::IsExpectedDisconnectResult(-ECONNRESET));
+    EXPECT_EQ(detail::DisconnectReasonForResult(-ECONNRESET),
               std::string_view("CONNECTION_RESET"));
 
-    EXPECT_TRUE(Session::IsExpectedDisconnectResult(-EPIPE));
-    EXPECT_EQ(Session::DisconnectReasonForResult(-EPIPE), std::string_view("BROKEN_PIPE"));
+    EXPECT_TRUE(detail::IsExpectedDisconnectResult(-EPIPE));
+    EXPECT_EQ(detail::DisconnectReasonForResult(-EPIPE), std::string_view("BROKEN_PIPE"));
 
-    EXPECT_TRUE(Session::IsExpectedDisconnectResult(-ENOTCONN));
-    EXPECT_EQ(Session::DisconnectReasonForResult(-ENOTCONN),
+    EXPECT_TRUE(detail::IsExpectedDisconnectResult(-ENOTCONN));
+    EXPECT_EQ(detail::DisconnectReasonForResult(-ENOTCONN),
               std::string_view("NOT_CONNECTED"));
 
-    EXPECT_TRUE(Session::IsExpectedDisconnectResult(-ESHUTDOWN));
-    EXPECT_EQ(Session::DisconnectReasonForResult(-ESHUTDOWN),
+    EXPECT_TRUE(detail::IsExpectedDisconnectResult(-ESHUTDOWN));
+    EXPECT_EQ(detail::DisconnectReasonForResult(-ESHUTDOWN),
               std::string_view("SOCKET_SHUTDOWN"));
 }
 
 TEST(SessionDisconnectClassificationTest, KeepsUnexpectedTransportErrorsVisible) {
-    EXPECT_FALSE(Session::IsExpectedDisconnectResult(-EINVAL));
-    EXPECT_EQ(Session::DisconnectReasonForResult(-EINVAL),
+    EXPECT_FALSE(detail::IsExpectedDisconnectResult(-EINVAL));
+    EXPECT_EQ(detail::DisconnectReasonForResult(-EINVAL),
               std::string_view("TRANSPORT_ERROR"));
 
-    EXPECT_FALSE(Session::IsExpectedDisconnectResult(12));
-    EXPECT_EQ(Session::DisconnectReasonForResult(12), std::string_view("OK"));
+    EXPECT_FALSE(detail::IsExpectedDisconnectResult(12));
+    EXPECT_EQ(detail::DisconnectReasonForResult(12), std::string_view("OK"));
 }
 
 TEST(SendBufferPoolTest, ReusesReleasedPartiallyFilledChunk) {

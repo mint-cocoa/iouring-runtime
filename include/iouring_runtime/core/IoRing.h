@@ -4,6 +4,7 @@
 #include <iouring_runtime/core/Error.h>
 #include <iouring_runtime/core/RingBuffer.h>
 #include <iouring_runtime/core/RingEvent.h>
+#include <iouring_runtime/core/SessionManager.h>
 #include <iouring_runtime/observability/Profiler.h>
 
 #include <chrono>
@@ -83,6 +84,8 @@ public:
     io_uring* Raw() const noexcept { return ring_; }
     int Fd() const noexcept;
     RingBuffer& BufRing() noexcept { return *buf_ring_; }
+    io::SessionManager& Sessions() noexcept { return session_manager_; }
+    const io::SessionManager& Sessions() const noexcept { return session_manager_; }
 
     static IoRing* Current() noexcept;
     static void SetCurrent(IoRing* ring) noexcept;
@@ -102,6 +105,7 @@ private:
 
     io_uring* ring_;
     std::unique_ptr<RingBuffer> buf_ring_;
+    io::SessionManager session_manager_;
     std::uint32_t submit_batch_size_;
     std::uint32_t cqe_batch_budget_;
     std::uint32_t pending_submissions_ = 0;

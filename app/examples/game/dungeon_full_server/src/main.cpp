@@ -7,6 +7,8 @@
 #include "db/memory_db_service.h"
 #include "db/sqlite_db_service.h"
 
+#include <iouring_runtime/core/SessionControl.h>
+
 #include <spdlog/spdlog.h>
 #include <signal.h>
 #include <atomic>
@@ -62,7 +64,8 @@ int main() {
         {
             auto session = std::make_shared<GameSession>(fd, ring, pool, worker);
             auto sid = g_next_sid.fetch_add(1);
-            session->SetSessionId(sid);
+            iouring_runtime::core::io::SessionControl::SetSessionId(
+                *session, sid);
             session->SetServices(&player_manager, &room_manager, db_ptr);
 
             worker->AddSession(sid, session);

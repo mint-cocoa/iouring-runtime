@@ -1,16 +1,11 @@
 #include <iouring_runtime/core/Session.h>
 #include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/observability/Profiler.h>
+#include <iouring_runtime/core/SessionDetail.h>
 
 #include <liburing.h>
 #include <iouring_runtime/observability/Logging.h>
 
-#include <arpa/inet.h>
 #include <cerrno>
-#include <cstring>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 
 namespace obs = iouring_runtime::observability;
 namespace {
@@ -19,45 +14,29 @@ constexpr auto kLogCategory = obs::LogCategory::kSession;
 
 namespace iouring_runtime::core::io {
 
-bool Session::IsExpectedDisconnectResult(std::int32_t result) {
-    if (result == 0) {
-        return true;
-    }
-    if (result > 0) {
-        return false;
-    }
+bool Session::ClosingStarted() const noexcept {
+    return state_.load(std::memory_order_acquire) != SessionState::kOpen;
+}
 
-    switch (-result) {
-    case ECONNRESET:
-    case EPIPE:
-    case ENOTCONN:
-    case ESHUTDOWN:
-        return true;
-    default:
-        return false;
+bool Session::CanUseOnOwner() const noexcept {
+    return state_.load(std::memory_order_relaxed) == SessionState::kOpen;
+}
+
+bool Session::TryBeginDisconnectOnOwner() noexcept {
+    auto expected = SessionState::kOpen;
+    return state_.compare_exchange_strong(expected, SessionState::kClosing,
+                                          std::memory_order_acq_rel,
+                                          std::memory_order_acquire);
+}
+
+void Session::MarkDrainingOnOwner() noexcept {
+    if (state_.load(std::memory_order_relaxed) == SessionState::kClosing) {
+        state_.store(SessionState::kDraining, std::memory_order_release);
     }
 }
 
-std::string_view Session::DisconnectReasonForResult(std::int32_t result) {
-    if (result == 0) {
-        return "PEER_CLOSE";
-    }
-    if (result > 0) {
-        return "OK";
-    }
-
-    switch (-result) {
-    case ECONNRESET:
-        return "CONNECTION_RESET";
-    case EPIPE:
-        return "BROKEN_PIPE";
-    case ENOTCONN:
-        return "NOT_CONNECTED";
-    case ESHUTDOWN:
-        return "SOCKET_SHUTDOWN";
-    default:
-        return "TRANSPORT_ERROR";
-    }
+void Session::MarkClosedOnOwner() noexcept {
+    state_.store(SessionState::kClosed, std::memory_order_release);
 }
 
 Session::Session(int fd, IoRing& ring, BufferPool& pool,
@@ -65,131 +44,52 @@ Session::Session(int fd, IoRing& ring, BufferPool& pool,
     : socket_(fd)
     , ring_(ring)
     , pool_(pool)
-    , send_queue_(send_queue_max_pending) {}
+    , send_queue_(send_queue_max_pending) {
+    drain_gate_.SetOnDrained([this] {
+        TryRelease();
+    });
+}
 
 Session::~Session() = default;
 
-std::string Session::FormatSockAddr(const struct sockaddr* sa, socklen_t len) {
-    if (!sa || len == 0) return {};
-
-    char host[INET6_ADDRSTRLEN] = {};
-    std::uint16_t port = 0;
-
-    if (sa->sa_family == AF_INET) {
-        if (len < static_cast<socklen_t>(sizeof(sockaddr_in))) return {};
-        const auto* in = reinterpret_cast<const sockaddr_in*>(sa);
-        if (!::inet_ntop(AF_INET, &in->sin_addr, host, sizeof(host))) return {};
-        port = ntohs(in->sin_port);
-        return std::string(host) + ":" + std::to_string(port);
+bool Session::RunOnOwner(std::move_only_function<void(Session&)> task) noexcept {
+    if (IoRing::Current() == &ring_) {
+        task(*this);
+        return true;
     }
-    if (sa->sa_family == AF_INET6) {
-        if (len < static_cast<socklen_t>(sizeof(sockaddr_in6))) return {};
-        const auto* in6 = reinterpret_cast<const sockaddr_in6*>(sa);
-        if (!::inet_ntop(AF_INET6, &in6->sin6_addr, host, sizeof(host))) return {};
-        port = ntohs(in6->sin6_port);
-        return "[" + std::string(host) + "]:" + std::to_string(port);
-    }
-    // AF_UNIX and anything else: no IP:port representation. Empty string
-    // signals "not a network peer" to handlers.
-    return {};
-}
 
-std::string_view Session::RemoteAddr() {
-    if (!remote_addr_resolved_) {
-        sockaddr_storage ss{};
-        socklen_t len = sizeof(ss);
-        if (::getpeername(socket_.Get(),
-                          reinterpret_cast<sockaddr*>(&ss), &len) == 0) {
-            remote_addr_ = FormatSockAddr(reinterpret_cast<sockaddr*>(&ss), len);
+    auto weak = weak_from_this();
+    return ring_.RunOnRing([weak = std::move(weak), task = std::move(task)]() mutable {
+        auto owner = weak.lock();
+        if (!owner) {
+            return;
         }
-        remote_addr_resolved_ = true;
-    }
-    return remote_addr_;
+
+        auto session = std::static_pointer_cast<Session>(std::move(owner));
+        task(*session);
+    });
 }
 
-void Session::SetInactivityTimeout(std::chrono::milliseconds timeout) {
-    inactivity_timeout_ = timeout;
-    if (timeout.count() == 0) return;
-
-    // Tick at a quarter of the deadline so a stalled session is detected
-    // within 1.25x the configured bound. Minimum 100ms to avoid runaway
-    // CQE volume on very short deadlines.
-    auto interval = timeout / 4;
-    SetTimeoutCheckInterval(interval);
-}
-
-void Session::SetTimeoutCheckInterval(std::chrono::milliseconds interval) {
-    if (interval.count() == 0) return;
-    if (interval < std::chrono::milliseconds{100})
-        interval = std::chrono::milliseconds{100};
-    if (check_interval_.count() == 0 || interval < check_interval_)
-        check_interval_ = interval;
-}
-
-void Session::SetBackpressureDisconnectDelay(std::chrono::milliseconds delay) {
-    backpressure_disconnect_delay_ = delay;
-    if (delay.count() > 0) {
-        SetTimeoutCheckInterval(delay / 4);
-    }
+ring::DrainGate::Token Session::EnterDrain() {
+    return drain_gate_.Enter();
 }
 
 void Session::Start() {
     auto self = std::static_pointer_cast<Session>(shared_from_this());
-    self_ref_ = self;  // self-ownership: Session keeps itself alive
-    last_activity_ = std::chrono::steady_clock::now();
+    ring_.Sessions().Add(self);
     OnConnected();
-    if (on_connected_)
-        on_connected_(self);
     RegisterRecv();
-    ArmWatchdog();
-}
-
-void Session::PauseRecv() {
-    if (disconnecting_ || recv_paused_) {
-        return;
-    }
-
-    recv_paused_ = true;
-    if (recv_armed_ && !recv_cancel_requested_ && active_recv_ev_) {
-        auto* cancel_ev = new (std::nothrow) ring::CancelEvent(active_recv_ev_);
-        if (!cancel_ev) {
-            return;
-        }
-        cancel_ev->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
-        cancel_ev->SetAutoDelete(true);
-        if (ring_.PrepCancel(*active_recv_ev_, cancel_ev)) {
-            recv_cancel_requested_ = true;
-            ++pending_io_;
-            ring_.Submit();
-        }
-    }
-}
-
-void Session::ResumeRecv() {
-    if (!recv_paused_) {
-        return;
-    }
-
-    recv_paused_ = false;
-    if (!FlushPausedRecvBuffer()) {
-        return;
-    }
-    if (!recv_armed_ && !recv_cancel_requested_ && !disconnecting_) {
-        RegisterRecv();
-    }
-}
-
-void Session::DisconnectAfterFlush() {
-    if (disconnecting_) return;
-
-    disconnect_after_flush_ = true;
-    MaybeDisconnectAfterFlush();
 }
 
 void Session::Disconnect() {
-    if (disconnecting_) return;
-    disconnecting_ = true;
-    obs::LogDebug(kLogCategory, "Session[fd={} sid={}]: [DISC:ENTER] Disconnect() called", Fd(), session_id_);
+    RunOnOwner([](Session& self) {
+        self.DisconnectOnOwner();
+    });
+}
+
+void Session::DisconnectOnOwner() {
+    if (!TryBeginDisconnectOnOwner()) return;
+    obs::LogDebug(kLogCategory, "Session[fd={}]: [DISC:ENTER] Disconnect() called", Fd());
 
     // 1. Shutdown the socket — causes recv to EOF and send to error,
     //    which naturally terminates the multishot recv.
@@ -197,49 +97,37 @@ void Session::Disconnect() {
     auto* disconnect_ev = new (std::nothrow) ring::DisconnectEvent();
     if (!disconnect_ev) {
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:OOM_SHUTDOWN] DisconnectEvent allocation failed", Fd());
+        drain_gate_.Close();
         TryRelease();
         return;
     }
     disconnect_ev->SetStrongOwner(self);
     disconnect_ev->SetAutoDelete(true);
+    disconnect_ev->SetDrainToken(EnterDrain());
     if (!ring_.PrepDisconnect(*disconnect_ev, Fd())) {
-        // SQE full: shutdown could not be submitted. Keep pending_io_ intact;
-        // outstanding recv/send/timeout CQEs still own Session refs and must
-        // drain before self_ref_ is released.
         delete disconnect_ev;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_SHUTDOWN] PrepDisconnect failed", Fd());
+        drain_gate_.Close();
         TryRelease();
         return;
     }
-    ++pending_io_;  // disconnect CQE pending
 
-    // 2. Cancel multishot recv for faster cleanup (best-effort).
-    //    If PrepCancel fails (SQE full), shutdown alone will still
-    //    terminate the multishot by delivering EOF.
+    // Cancel multishot recv for faster cleanup (best-effort). If PrepCancel
+    // fails, shutdown alone will still terminate the multishot by delivering EOF.
     if (active_recv_ev_) {
         auto* cancel_ev = new (std::nothrow) ring::CancelEvent(active_recv_ev_);
         if (cancel_ev) {
             cancel_ev->SetStrongOwner(self);
             cancel_ev->SetAutoDelete(true);
-            if (ring_.PrepCancel(*active_recv_ev_, cancel_ev)) {
-                ++pending_io_;
+            cancel_ev->SetDrainToken(EnterDrain());
+            if (!ring_.PrepCancel(*active_recv_ev_, cancel_ev)) {
+                delete cancel_ev;
             }
         }
     }
 
-    // 3. Cancel inactivity watchdog if one is in flight — otherwise we'd
-    //    wait up to check_interval_ before pending_io_ reaches zero.
-    if (timeout_armed_ && active_timeout_ev_) {
-        auto* cancel_ev = new (std::nothrow) ring::CancelEvent(active_timeout_ev_);
-        if (cancel_ev) {
-            cancel_ev->SetStrongOwner(self);
-            cancel_ev->SetAutoDelete(true);
-            if (ring_.PrepCancel(*active_timeout_ev_, cancel_ev)) {
-                ++pending_io_;
-            }
-        }
-    }
-
+    MarkDrainingOnOwner();
+    drain_gate_.Close();
     ring_.Submit();
 }
 
@@ -249,55 +137,30 @@ void Session::OnRecv(ring::RecvEvent&,
                      std::int32_t res, std::uint32_t flags) {
     const bool more = (flags & IORING_CQE_F_MORE) != 0;
     const bool has_buffer = (flags & IORING_CQE_F_BUFFER) != 0;
-    const bool was_cancel_requested = recv_cancel_requested_;
 
     // No F_MORE means the kernel will send no more CQEs for this SQE.
     if (!more) {
-        recv_armed_ = false;
-        recv_cancel_requested_ = false;
         active_recv_ev_ = nullptr;
-        --pending_io_;
     }
 
     // Always return provided buffer to the ring, even during disconnect.
     // Failing to return leaks buffers from the provided buffer pool.
-    bool paused_recv_overflow = false;
     if (has_buffer) {
         std::uint16_t buf_id = flags >> IORING_CQE_BUFFER_SHIFT;
         auto& buf_ring = ring_.BufRing();
 
-        if (res > 0 && !disconnecting_) {
-            last_activity_ = std::chrono::steady_clock::now();
+        if (res > 0 && CanUseOnOwner()) {
             auto view = buf_ring.View(buf_id, static_cast<std::uint32_t>(res));
-            if (recv_paused_) {
-                paused_recv_overflow = !paused_recv_.Push(view);
-            } else {
-                OnRecv(view);
-            }
+            OnRecv(view);
         }
 
         buf_ring.Return(buf_id);
     }
 
-    if (paused_recv_overflow) {
-        obs::LogError(kLogCategory,
-                      "Session[fd={}]: [DISC:PAUSED_RECV_OVERFLOW] paused recv buffer overflow",
-                      Fd());
-        Disconnect();
-        return;
-    }
-
     // During disconnect, skip normal error handling — just wait for
-    // all in-flight ops to settle before releasing self_ref_.
-    if (disconnecting_) {
+    // all in-flight ops to settle before releasing manager ownership.
+    if (!CanUseOnOwner()) {
         TryRelease();
-        return;
-    }
-
-    if (was_cancel_requested && res == -ECANCELED) {
-        if (!recv_paused_) {
-            RegisterRecv();
-        }
         return;
     }
 
@@ -305,7 +168,7 @@ void Session::OnRecv(ring::RecvEvent&,
     if (res == 0) {
         // Peer closed session
         obs::LogDebug(kLogCategory, "Session[fd={}]: [DISC:{}] peer closed connection",
-                      Fd(), DisconnectReasonForResult(res));
+                      Fd(), detail::DisconnectReasonForResult(res));
         Disconnect();
         return;
     }
@@ -313,16 +176,14 @@ void Session::OnRecv(ring::RecvEvent&,
     if (res == -ENOBUFS) {
         // Buffer pool exhausted — multishot terminated, re-register
         obs::LogWarn(kLogCategory, "Session[fd={}]: [WARN:ENOBUFS] provided buffer pool exhausted, re-registering", Fd());
-        if (!recv_paused_) {
-            RegisterRecv();
-        }
+        RegisterRecv();
         return;
     }
 
     if (res < 0) {
-        if (IsExpectedDisconnectResult(res)) {
+        if (detail::IsExpectedDisconnectResult(res)) {
             obs::LogDebug(kLogCategory, "Session[fd={}]: [DISC:{}] recv closed res={}",
-                          Fd(), DisconnectReasonForResult(res), res);
+                          Fd(), detail::DisconnectReasonForResult(res), res);
         } else {
             obs::LogError(kLogCategory, "Session[fd={}]: [DISC:RECV_ERR] recv error res={}",
                           Fd(), res);
@@ -332,113 +193,42 @@ void Session::OnRecv(ring::RecvEvent&,
     }
 
     // Multishot ended normally (e.g. internal resource limit) — re-register
-    if (!more && !recv_paused_)
+    if (!more)
         RegisterRecv();
 }
 
 void Session::OnDisconnect(ring::DisconnectEvent&, std::int32_t) {
-    --pending_io_;
     TryRelease();
 }
 
 void Session::OnCancel(ring::CancelEvent&, std::int32_t) {
-    --pending_io_;
     TryRelease();
 }
 
-// -- Self-ownership release gate ----
+// -- Drain release gate ----
 
 void Session::TryRelease() {
-    if (pending_io_ > 0)
+    if (!ClosingStarted() || !drain_gate_.Drained())
         return;
+    if (disconnected_notified_)
+        return;
+    disconnected_notified_ = true;
+    MarkClosedOnOwner();
 
-    obs::LogDebug(kLogCategory, "Session[fd={} sid={}]: [DISC:RELEASED] session destroyed", Fd(), session_id_);
+    obs::LogDebug(kLogCategory, "Session[fd={}]: [DISC:RELEASED] session destroyed", Fd());
+    auto self = std::static_pointer_cast<Session>(shared_from_this());
     OnDisconnected();
-    if (on_disconnect_)
-        on_disconnect_(std::static_pointer_cast<Session>(shared_from_this()));
 
-    // Release self-ownership. The Dispatch keep_alive vector still holds a
-    // reference, so actual destruction is deferred until the CQE batch ends.
-    self_ref_.reset();
-}
-
-void Session::ReleaseOwnership() {
-    self_ref_.reset();
-}
-
-bool Session::CanDisconnectAfterFlush() const {
-    return disconnect_after_flush_ &&
-           send_queue_.Snapshot().current_depth == 0 &&
-           active_send_ev_ == nullptr &&
-           !HasPendingAppWork();
-}
-
-bool Session::DisconnectIfBackpressureExpired(
-    std::chrono::steady_clock::time_point now) {
-    if (!disconnect_on_high_watermark_ || !backpressure_active_ ||
-        backpressure_disconnect_delay_.count() <= 0 ||
-        backpressure_active_since_ == std::chrono::steady_clock::time_point{}) {
-        return false;
-    }
-
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - backpressure_active_since_);
-    if (elapsed < backpressure_disconnect_delay_) {
-        return false;
-    }
-
-    obs::LogWarn(kLogCategory,
-                 "Session[fd={}]: [DISC:SLOW_CLIENT_TIMEOUT] send queue pressure elapsed={}ms timeout={}ms",
-                 Fd(), elapsed.count(), backpressure_disconnect_delay_.count());
-    Disconnect();
-    return true;
-}
-
-bool Session::FlushPausedRecvBuffer() {
-    if (paused_recv_.Empty()) {
-        return true;
-    }
-
-    while (!paused_recv_.Empty() && !disconnecting_) {
-        auto pending = paused_recv_.Pop();
-        if (!pending) {
-            break;
-        }
-        OnRecv(std::span<const std::byte>(
-            pending->data.data(), pending->data.size()));
-    }
-    return !disconnecting_;
-}
-
-void Session::MaybeDisconnectAfterFlush() {
-    if (disconnecting_) return;
-    if (CanDisconnectAfterFlush()) {
-        Disconnect();
-    }
-}
-
-bool Session::HasPendingSocketWrites() const {
-    return send_queue_.Snapshot().current_depth != 0 || active_send_ev_ != nullptr;
-}
-
-void Session::BeginAppIo() {
-    ++pending_io_;
-}
-
-void Session::EndAppIo() {
-    --pending_io_;
-    if (disconnecting_) {
-        TryRelease();
-        return;
-    }
-    MaybeDisconnectAfterFlush();
+    // Release connected-session ownership. Pending event owners still defer
+    // actual destruction as needed.
+    ring_.Sessions().Release(self);
 }
 
 // -- SQE registration ----
 
 void Session::RegisterRecv() {
-    if (disconnecting_) return;
-    if (recv_paused_ || recv_armed_) return;
+    if (!CanUseOnOwner()) return;
+    if (active_recv_ev_) return;
     auto* recv_ev = new (std::nothrow) ring::RecvEvent();
     if (!recv_ev) {
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:OOM_RECV] RecvEvent allocation failed", Fd());
@@ -447,76 +237,15 @@ void Session::RegisterRecv() {
     }
     recv_ev->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
     recv_ev->SetAutoDelete(true);
-    ++pending_io_;
+    recv_ev->SetDrainToken(EnterDrain());
     if (!ring_.PrepRecvMultishot(*recv_ev, Fd())) {
-        --pending_io_;
         delete recv_ev;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_RECV] PrepRecvMultishot failed", Fd());
         Disconnect();
         return;
     }
     active_recv_ev_ = recv_ev;
-    recv_armed_ = true;
     ring_.Submit();
-}
-
-void Session::ArmWatchdog() {
-    if (check_interval_.count() == 0) return;  // disabled
-    if (timeout_armed_) return;
-    if (disconnecting_) return;
-
-    auto* timeout_ev = new (std::nothrow) ring::TimeoutEvent();
-    if (!timeout_ev) {
-        obs::LogError(kLogCategory, "Session[fd={}]: ArmWatchdog allocation failed", Fd());
-        return;
-    }
-    timeout_ev->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
-    timeout_ev->SetAutoDelete(true);
-    ++pending_io_;
-    if (!ring_.PrepTimeout(*timeout_ev, check_interval_)) {
-        --pending_io_;
-        delete timeout_ev;
-        obs::LogError(kLogCategory, "Session[fd={}]: ArmWatchdog SQE full", Fd());
-        return;
-    }
-    active_timeout_ev_ = timeout_ev;
-    timeout_armed_ = true;
-    ring_.Submit();
-}
-
-void Session::OnTimeout(ring::TimeoutEvent& ev, std::int32_t res) {
-    --pending_io_;
-    if (&ev == active_timeout_ev_) {
-        active_timeout_ev_ = nullptr;
-    }
-    timeout_armed_ = false;
-
-    if (disconnecting_) {
-        // -ECANCELED from Disconnect's cancel SQE, or the watchdog just
-        // happened to fire — either way, drain the pending-io count.
-        TryRelease();
-        return;
-    }
-
-    // -ECANCELED without disconnect shouldn't normally happen — the only
-    // cancel site is Disconnect(). Treat it as a no-op.
-    if (res == -ECANCELED) return;
-
-    auto now = std::chrono::steady_clock::now();
-    if (DisconnectIfBackpressureExpired(now)) return;
-
-    if (OnTimeoutTick(now)) return;
-
-    auto idle = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_activity_);
-    if (inactivity_timeout_.count() > 0 && idle >= inactivity_timeout_) {
-        obs::LogWarn(kLogCategory, "Session[fd={}]: [DISC:INACTIVITY] idle={}ms timeout={}ms",
-                     Fd(), idle.count(), inactivity_timeout_.count());
-        Disconnect();
-        return;
-    }
-
-    // Still within budget — rearm for the next check tick.
-    ArmWatchdog();
 }
 
 } // namespace iouring_runtime::core::io

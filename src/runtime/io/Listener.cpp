@@ -87,6 +87,17 @@ std::expected<void, io::IoError> Listener::Start() {
 }
 
 void Listener::Stop() {
+    if (active_accept_ev_ && !accept_cancel_requested_) {
+        auto* cancel_ev = new (std::nothrow) ring::StrongCancelEvent(
+            shared_from_this(), active_accept_ev_);
+        if (cancel_ev) {
+            cancel_ev->SetAutoDelete(true);
+            if (ring_.PrepCancel(*active_accept_ev_, cancel_ev)) {
+                accept_cancel_requested_ = true;
+                ring_.Submit();
+            }
+        }
+    }
     listen_fd_.Reset();
 }
 
@@ -95,11 +106,11 @@ bool Listener::RegisterAccept() {
         return false;
     }
 
-    auto* accept_ev = new (std::nothrow) ring::AcceptEvent();
+    auto* accept_ev = new (std::nothrow) ring::StrongAcceptEvent(
+        shared_from_this());
     if (!accept_ev) {
         return false;
     }
-    accept_ev->SetStrongOwner(shared_from_this());
     accept_ev->SetAutoDelete(true);
     if (!ring_.PrepAcceptMultishot(*accept_ev, listen_fd_.Get())) {
         delete accept_ev;
@@ -115,6 +126,7 @@ void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t f
     const bool more = (flags & IORING_CQE_F_MORE) != 0;
     if (!more) {
         active_accept_ev_ = nullptr;
+        accept_cancel_requested_ = false;
     }
 
     if (result < 0) {
@@ -138,6 +150,8 @@ void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t f
             obs::LogError(kLogCategory, "Listener: re-register accept failed (SQE full)");
     }
 }
+
+void Listener::OnCancel(ring::CancelEvent&, std::int32_t) {}
 
 void Listener::OnAccept(int client_fd) {
     // Backpressure: reject new sessions when at capacity

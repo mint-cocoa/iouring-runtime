@@ -1,4 +1,5 @@
 #include <iouring_runtime/core/Worker.h>
+#include <iouring_runtime/core/SessionControl.h>
 #include <iouring_runtime/game/PlayerRegistry.h>
 #include <iouring_runtime/game/RoomManager.h>
 
@@ -49,7 +50,8 @@ int main() {
             -> iouring_runtime::core::io::SessionRef {
         auto session = std::make_shared<DungeonGameSession>(
             fd, ring_ref, pool_ref, player_registry, room_manager);
-        session->SetSessionId(
+        iouring_runtime::core::io::SessionControl::SetSessionId(
+            *session,
             g_next_session_id.fetch_add(1, std::memory_order_relaxed));
         return session;
     };

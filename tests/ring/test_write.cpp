@@ -38,8 +38,7 @@ TEST(IoRingWrite, WritesToPipe) {
 
     constexpr std::string_view payload = "hello through io_uring write";
     auto observer = std::make_shared<WriteObserver>();
-    auto* ev = new WriteEvent();
-    ev->SetStrongOwner(observer);
+    auto* ev = new StrongWriteEvent(observer);
     ev->SetAutoDelete(true);
 
     ASSERT_TRUE(ring.PrepWrite(*ev, fds[1], payload.data(),

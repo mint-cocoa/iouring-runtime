@@ -114,23 +114,6 @@ void Worker::AddListener(Address address, SessionFactory factory,
     });
 }
 
-void Worker::TrackSession(const SessionRef& session) {
-    if (!session) {
-        return;
-    }
-
-    session->AddConnectedCallback([this](SessionRef session_ref) {
-        live_sessions_.fetch_add(1, std::memory_order_relaxed);
-        std::lock_guard lock(sessions_mu_);
-        sessions_.emplace(session_ref.get(), std::move(session_ref));
-    });
-    session->AddDisconnectCallback([this](SessionRef session_ref) {
-        live_sessions_.fetch_sub(1, std::memory_order_relaxed);
-        std::lock_guard lock(sessions_mu_);
-        sessions_.erase(session_ref.get());
-    });
-}
-
 void Worker::StopAccepting() {
     if (!ring_) {
         return;
@@ -147,34 +130,19 @@ void Worker::StopAccepting() {
     });
 }
 
-void Worker::DrainSessions(bool force_close) {
+void Worker::DrainSessions(bool /*force_close*/) {
     if (!ring_) {
         return;
     }
 
-    std::vector<SessionRef> sessions;
-    {
-        std::lock_guard lock(sessions_mu_);
-        sessions.reserve(sessions_.size());
-        for (const auto& [_, session] : sessions_) {
-            sessions.push_back(session);
-        }
-    }
-
-    if (sessions.empty()) {
-        return;
-    }
-
-    ring_->RunOnRing([sessions = std::move(sessions), force_close]() mutable {
+    auto* ring = ring_.get();
+    ring_->RunOnRing([ring]() {
+        auto sessions = ring->Sessions().Snapshot();
         for (auto& session : sessions) {
             if (!session || session->Disconnecting()) {
                 continue;
             }
-            if (force_close) {
-                session->Disconnect();
-            } else {
-                session->DisconnectAfterFlush();
-            }
+            session->Disconnect();
         }
     });
 }
@@ -182,7 +150,7 @@ void Worker::DrainSessions(bool force_close) {
 bool Worker::WaitForZeroSessions(std::chrono::milliseconds timeout) const {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
-        if (live_sessions_.load(std::memory_order_relaxed) == 0) {
+        if (LiveSessions() == 0) {
             return true;
         }
         if (std::chrono::steady_clock::now() >= deadline) {
@@ -210,7 +178,7 @@ bool Worker::IsCurrentThread() const noexcept {
 }
 
 std::size_t Worker::LiveSessions() const noexcept {
-    return live_sessions_.load(std::memory_order_relaxed);
+    return ring_ ? ring_->Sessions().Count() : 0;
 }
 
 void Worker::Run() {
@@ -247,7 +215,6 @@ std::shared_ptr<Listener> Worker::MakeListener(
         if (!session) {
             return nullptr;
         }
-        TrackSession(session);
         return session;
     };
 
@@ -255,7 +222,7 @@ std::shared_ptr<Listener> Worker::MakeListener(
         *ring_, pool_, address, std::move(wrapped_factory),
         config_.id, max_sessions);
     listener->SetSessionCountFn([this] {
-        auto count = live_sessions_.load(std::memory_order_relaxed);
+        auto count = LiveSessions();
         if (config_.extra_session_count) {
             count += config_.extra_session_count();
         }

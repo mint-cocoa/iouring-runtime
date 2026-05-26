@@ -1,23 +1,24 @@
 #include <iouring_runtime/core/Session.h>
 #include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/core/PausedRecvQueue.h>
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <memory>
+#include <string_view>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 using namespace iouring_runtime::core;
 using namespace iouring_runtime::core::io;
 using namespace iouring_runtime::core::ring;
 using namespace iouring_runtime::core::buffer;
-
-// -- Test subclass ----
 
 class TestSession : public Session {
 public:
@@ -45,45 +46,11 @@ protected:
     }
 };
 
-class PendingAppIoSession : public Session {
-public:
-    using Session::Session;
-
-    std::atomic<bool> disconnected{false};
-    std::atomic<int> disconnect_count{0};
-    std::atomic<int> pending_app_work{0};
-
-    void StartAppIo() {
-        pending_app_work.fetch_add(1, std::memory_order_relaxed);
-        BeginAppIo();
-    }
-
-    void FinishAppIo() {
-        pending_app_work.fetch_sub(1, std::memory_order_relaxed);
-        EndAppIo();
-    }
-
-protected:
-    void OnRecv(std::span<const std::byte> /*data*/) override {}
-
-    bool HasPendingAppWork() const override {
-        return pending_app_work.load(std::memory_order_relaxed) > 0;
-    }
-
-    void OnDisconnected() override {
-        disconnected.store(true, std::memory_order_relaxed);
-        disconnect_count.fetch_add(1, std::memory_order_relaxed);
-    }
-};
-
-// -- Helpers ----
-
 static constexpr IoRingConfig kTestRingConfig{
     .queue_depth = 64,
     .buf_ring = {.buf_count = 16, .buf_size = 4096},
 };
 
-// Dispatch loop with a deadline.
 static void DispatchUntil(IoRing& ring, std::function<bool()> pred,
                           std::chrono::milliseconds timeout = std::chrono::milliseconds{2000}) {
     auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -94,8 +61,8 @@ static void DispatchUntil(IoRing& ring, std::function<bool()> pred,
 }
 
 struct SocketPair {
-    int local;   // Session side
-    int remote;  // Peer side
+    int local;
+    int remote;
 };
 
 static SocketPair MakeSocketPair() {
@@ -104,8 +71,6 @@ static SocketPair MakeSocketPair() {
     EXPECT_EQ(ret, 0);
     return {sv[0], sv[1]};
 }
-
-// -- Fixture ----
 
 class SessionLifecycleTest : public ::testing::Test {
 protected:
@@ -124,10 +89,6 @@ protected:
     std::unique_ptr<IoRing> ring_;
 };
 
-// -- Tests ----
-
-// Peer close -> recv EOF -> Disconnect -> TryRelease -> self_ref released,
-// disconnect callback called exactly once.
 TEST_F(SessionLifecycleTest, NormalDisconnect) {
     auto [local_fd, remote_fd] = MakeSocketPair();
 
@@ -137,125 +98,33 @@ TEST_F(SessionLifecycleTest, NormalDisconnect) {
     EXPECT_TRUE(sess->connected.load());
     EXPECT_FALSE(sess->disconnected.load());
 
-    // Close peer -> triggers recv EOF on local
     ::close(remote_fd);
 
     DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
 
     EXPECT_TRUE(sess->disconnected.load());
     EXPECT_EQ(sess->disconnect_count.load(), 1);
-
-    // After TryRelease, only our local shared_ptr should remain
-    // (self_ref_ was reset inside TryRelease)
     EXPECT_EQ(sess.use_count(), 1);
 }
 
-TEST_F(SessionLifecycleTest, AppendedLifecycleCallbacksPreserveExistingCallbacks) {
-    auto [local_fd, remote_fd] = MakeSocketPair();
-
-    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
-    std::atomic<int> connected_callbacks{0};
-    std::atomic<int> disconnected_callbacks{0};
-
-    sess->SetConnectedCallback([&](SessionRef) {
-        connected_callbacks.fetch_add(1, std::memory_order_relaxed);
-    });
-    sess->AddConnectedCallback([&](SessionRef) {
-        connected_callbacks.fetch_add(1, std::memory_order_relaxed);
-    });
-    sess->SetDisconnectCallback([&](SessionRef) {
-        disconnected_callbacks.fetch_add(1, std::memory_order_relaxed);
-    });
-    sess->AddDisconnectCallback([&](SessionRef) {
-        disconnected_callbacks.fetch_add(1, std::memory_order_relaxed);
-    });
-
-    sess->Start();
-    EXPECT_EQ(connected_callbacks.load(std::memory_order_relaxed), 2);
-
-    ::close(remote_fd);
-    DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
-
-    EXPECT_EQ(disconnected_callbacks.load(std::memory_order_relaxed), 2);
-    EXPECT_EQ(sess->disconnect_count.load(), 1);
-}
-
-TEST_F(SessionLifecycleTest, PauseRecvBeforeStartDefersReadsUntilResume) {
-    auto [local_fd, remote_fd] = MakeSocketPair();
-
-    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
-    sess->PauseRecv();
-    sess->Start();
-
-    ASSERT_EQ(::write(remote_fd, "paused", 6), 6);
-    DispatchUntil(*ring_, [&] {
-        return sess->recv_count.load(std::memory_order_relaxed) != 0;
-    }, std::chrono::milliseconds{100});
-    EXPECT_EQ(sess->recv_count.load(std::memory_order_relaxed), 0);
-
-    sess->ResumeRecv();
-    DispatchUntil(*ring_, [&] {
-        return sess->recv_bytes.load(std::memory_order_relaxed) == 6;
-    });
-    EXPECT_EQ(sess->recv_bytes.load(std::memory_order_relaxed), 6);
-
-    ::close(remote_fd);
-    DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
-}
-
-TEST(PausedRecvQueueTest, PreservesChunksAndTracksLimit) {
-    PausedRecvQueue queue(80 * 1024);
-    std::vector<std::byte> first(48 * 1024, std::byte{'A'});
-    std::vector<std::byte> second(32 * 1024, std::byte{'B'});
-    std::vector<std::byte> overflow(1, std::byte{'C'});
-
-    EXPECT_TRUE(queue.Push(first));
-    EXPECT_TRUE(queue.Push(second));
-    EXPECT_FALSE(queue.Push(overflow));
-
-    auto stats = queue.Snapshot();
-    EXPECT_EQ(stats.current_bytes, 80u * 1024u);
-    EXPECT_EQ(stats.peak_bytes, 80u * 1024u);
-    EXPECT_EQ(stats.events, 2u);
-    EXPECT_EQ(stats.overflow_count, 1u);
-    EXPECT_EQ(stats.dropped_bytes, 1u);
-
-    auto out = queue.Pop();
-    ASSERT_TRUE(out.has_value());
-    EXPECT_EQ(out->data.size(), first.size());
-    EXPECT_EQ(out->data.front(), std::byte{'A'});
-
-    out = queue.Pop();
-    ASSERT_TRUE(out.has_value());
-    EXPECT_EQ(out->data.size(), second.size());
-    EXPECT_EQ(out->data.front(), std::byte{'B'});
-    EXPECT_TRUE(queue.Empty());
-}
-
-// Send data, then peer closes. Both send CQE and recv EOF must settle
-// before release.
 TEST_F(SessionLifecycleTest, SendThenPeerClose) {
     auto [local_fd, remote_fd] = MakeSocketPair();
 
     auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
     sess->Start();
 
-    // Send some data
     auto buf_result = pool_.Allocate(128);
     ASSERT_TRUE(buf_result.has_value());
     auto buf = std::move(*buf_result);
     std::memset(buf->Writable().data(), 0xAB, 128);
     buf->Commit(128);
-    sess->Send(std::move(buf));
+    ASSERT_TRUE(sess->Send(std::move(buf)).has_value());
 
-    // Let send complete
     ring_->Dispatch(std::chrono::milliseconds{50});
 
-    // Read from remote to ensure send completes
     std::byte tmp[256];
     ::recv(remote_fd, tmp, sizeof(tmp), 0);
 
-    // Now close peer
     ::close(remote_fd);
 
     DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
@@ -265,223 +134,189 @@ TEST_F(SessionLifecycleTest, SendThenPeerClose) {
     EXPECT_EQ(sess.use_count(), 1);
 }
 
-// When send queue overflows, the overflow callback fires and
-// Session auto-disconnects.
-TEST_F(SessionLifecycleTest, SendQueueOverflow) {
+TEST_F(SessionLifecycleTest, SendFromExternalThreadMarshalsToOwnerRing) {
     auto [local_fd, remote_fd] = MakeSocketPair();
 
     auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
+    sess->Start();
 
-    std::atomic<bool> overflow_fired{false};
-    sess->SetSendOverflowCallback([&](SessionRef) {
-        overflow_fired.store(true, std::memory_order_relaxed);
+    auto buf_result = pool_.Allocate(32);
+    ASSERT_TRUE(buf_result.has_value());
+    auto buf = std::move(*buf_result);
+    std::thread sender([&, buf = std::move(buf)]() mutable {
+        std::memcpy(buf->Writable().data(), "owner-marshal", 13);
+        buf->Commit(13);
+        EXPECT_TRUE(sess->Send(std::move(buf)).has_value());
     });
+    sender.join();
 
-    sess->Start();
-
-    // Fill the send queue (default max_pending = 4096) beyond capacity.
-    // Each Push must return overflow at some point.
-    // We need to push faster than the IO thread can drain.
-    // The default SendQueue max is 4096, so push slightly above that.
-    for (int i = 0; i < 5000; ++i) {
-        auto buf_result = pool_.Allocate(64);
-        if (!buf_result) break;
-        auto buf = std::move(*buf_result);
-        std::memset(buf->Writable().data(), 0, 64);
-        buf->Commit(64);
-        sess->Send(std::move(buf));
-        if (overflow_fired.load(std::memory_order_relaxed)) break;
-    }
-
-    // Dispatch to let disconnect settle
-    DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
-
-    EXPECT_TRUE(overflow_fired.load());
-    EXPECT_TRUE(sess->Disconnecting());
-    EXPECT_TRUE(sess->disconnected.load());
-    auto stats = sess->SendQueueStats();
-    EXPECT_GE(stats.overflow_count, 1u);
-    EXPECT_GE(stats.peak_depth, 1u);
-
-    // Cleanup peer side
-    ::close(remote_fd);
-}
-
-TEST_F(SessionLifecycleTest, DisconnectAfterFlushDrainsQueuedBuffers) {
-    auto [local_fd, remote_fd] = MakeSocketPair();
-
-    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
-    sess->Start();
-
-    constexpr std::size_t kChunkSize = 32 * 1024;
-    constexpr int kChunkCount = 3;
-    std::string expected;
-    expected.reserve(kChunkSize * kChunkCount);
-
-    for (int i = 0; i < kChunkCount; ++i) {
-        auto buf_result = pool_.Allocate(static_cast<std::uint32_t>(kChunkSize));
-        ASSERT_TRUE(buf_result.has_value());
-        auto buf = std::move(*buf_result);
-        std::memset(buf->Writable().data(), 'A' + i, kChunkSize);
-        buf->Commit(static_cast<std::uint32_t>(kChunkSize));
-        expected.append(kChunkSize, static_cast<char>('A' + i));
-        ASSERT_TRUE(sess->Send(std::move(buf)).has_value());
-    }
-
-    sess->DisconnectAfterFlush();
-    std::string received;
-    received.resize(expected.size());
+    std::array<char, 32> received{};
     std::size_t total = 0;
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while ((total < received.size() || !sess->disconnected.load()) &&
-           std::chrono::steady_clock::now() < deadline) {
-        ring_->ProcessPostedTasks();
-        ring_->Dispatch(std::chrono::milliseconds{10});
-
+    DispatchUntil(*ring_, [&] {
         auto n = ::recv(remote_fd, received.data() + total,
                         received.size() - total, MSG_DONTWAIT);
         if (n > 0) {
             total += static_cast<std::size_t>(n);
         }
+        return total == 13;
+    });
+
+    EXPECT_EQ(total, 13u);
+    EXPECT_EQ(std::string_view(received.data(), 13), "owner-marshal");
+
+    ::close(remote_fd);
+    DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
+}
+
+TEST_F(SessionLifecycleTest, DisconnectFromExternalThreadMarshalsToOwnerRing) {
+    auto [local_fd, remote_fd] = MakeSocketPair();
+
+    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
+    sess->Start();
+
+    std::thread closer([&] {
+        sess->Disconnect();
+    });
+    closer.join();
+
+    DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
+
+    EXPECT_TRUE(sess->Disconnecting());
+    EXPECT_TRUE(sess->disconnected.load());
+    EXPECT_EQ(sess->disconnect_count.load(), 1);
+
+    ::close(remote_fd);
+}
+
+TEST_F(SessionLifecycleTest, InterleavedDisconnectSourcesNotifyOnce) {
+    auto [local_fd, remote_fd] = MakeSocketPair();
+
+    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
+    sess->Start();
+    EXPECT_EQ(ring_->Sessions().Count(), 1u);
+
+    auto buf_result = pool_.Allocate(512 * 1024);
+    ASSERT_TRUE(buf_result.has_value());
+    auto buf = std::move(*buf_result);
+    std::memset(buf->Writable().data(), 0xA5, 512 * 1024);
+    buf->Commit(512 * 1024);
+    ASSERT_TRUE(sess->Send(std::move(buf)).has_value());
+
+    std::thread closer([sess] {
+        sess->Disconnect();
+    });
+    ::close(remote_fd);
+    closer.join();
+
+    DispatchUntil(*ring_, [&] {
+        return sess->disconnected.load() && ring_->Sessions().Count() == 0;
+    });
+
+    EXPECT_TRUE(sess->Disconnecting());
+    EXPECT_TRUE(sess->disconnected.load());
+    EXPECT_EQ(sess->disconnect_count.load(), 1);
+    EXPECT_EQ(ring_->Sessions().Count(), 0u);
+}
+
+TEST_F(SessionLifecycleTest, MixedShutdownDrainsWithoutExternalOwner) {
+    auto [local_fd, remote_fd] = MakeSocketPair();
+
+    std::weak_ptr<TestSession> weak;
+    {
+        auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_);
+        weak = sess;
+        sess->Start();
+        EXPECT_EQ(ring_->Sessions().Count(), 1u);
+
+        auto buf_result = pool_.Allocate(128 * 1024);
+        ASSERT_TRUE(buf_result.has_value());
+        auto buf = std::move(*buf_result);
+        std::memset(buf->Writable().data(), 0x5A, 128 * 1024);
+        buf->Commit(128 * 1024);
+        ASSERT_TRUE(sess->Send(std::move(buf)).has_value());
+
+        sess->Disconnect();
     }
 
-    EXPECT_EQ(total, received.size());
-    EXPECT_EQ(received, expected);
-    EXPECT_TRUE(sess->disconnected.load());
-    EXPECT_EQ(sess->disconnect_count.load(), 1);
-
     ::close(remote_fd);
+
+    DispatchUntil(*ring_, [&] {
+        return weak.expired() && ring_->Sessions().Count() == 0;
+    });
+
+    EXPECT_TRUE(weak.expired());
+    EXPECT_EQ(ring_->Sessions().Count(), 0u);
 }
 
-TEST_F(SessionLifecycleTest, DisconnectAfterFlushWaitsForPendingAppWork) {
+TEST(SessionLifecycleDrainGateTest, FirstDisconnectCqeDoesNotReleaseSession) {
+    IoRingConfig config{
+        .queue_depth = 64,
+        .buf_ring = {.buf_count = 16, .buf_size = 4096},
+        .cqe_batch_budget = 1,
+    };
+    auto ring_result = IoRing::Create(config);
+    ASSERT_TRUE(ring_result.has_value());
+    auto ring = std::move(*ring_result);
+    IoRing::SetCurrent(ring.get());
+
+    BufferPool pool;
     auto [local_fd, remote_fd] = MakeSocketPair();
-
-    auto sess = std::make_shared<PendingAppIoSession>(local_fd, *ring_, pool_);
+    auto sess = std::make_shared<TestSession>(local_fd, *ring, pool);
     sess->Start();
-    sess->StartAppIo();
+    ASSERT_EQ(ring->Sessions().Count(), 1u);
 
-    sess->DisconnectAfterFlush();
+    sess->Disconnect();
 
-    ring_->ProcessPostedTasks();
-    ring_->Dispatch(std::chrono::milliseconds{50});
+    ring->Dispatch(std::chrono::milliseconds{500});
 
-    EXPECT_FALSE(sess->Disconnecting());
+    EXPECT_TRUE(sess->Disconnecting());
     EXPECT_FALSE(sess->disconnected.load());
     EXPECT_EQ(sess->disconnect_count.load(), 0);
+    EXPECT_EQ(ring->Sessions().Count(), 1u);
 
-    sess->FinishAppIo();
+    DispatchUntil(*ring, [&] {
+        return sess->disconnected.load() && ring->Sessions().Count() == 0;
+    });
 
-    DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
-
-    EXPECT_TRUE(sess->Disconnecting());
     EXPECT_TRUE(sess->disconnected.load());
     EXPECT_EQ(sess->disconnect_count.load(), 1);
+    EXPECT_EQ(ring->Sessions().Count(), 0u);
 
     ::close(remote_fd);
+    IoRing::SetCurrent(nullptr);
 }
 
-TEST_F(SessionLifecycleTest, BackpressureWatermarkTransitions) {
+TEST_F(SessionLifecycleTest, SendQueueOverflowDisconnects) {
     auto [local_fd, remote_fd] = MakeSocketPair();
 
-    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_, 8);
-    std::vector<bool> transitions;
-    sess->SetBackpressureWatermarks(1, 0);
-    sess->SetBackpressureCallback([&](SessionRef, bool active) {
-        transitions.push_back(active);
-    });
+    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_, 1);
     sess->Start();
 
-    auto buf_result = pool_.Allocate(64);
-    ASSERT_TRUE(buf_result.has_value());
-    auto buf = std::move(*buf_result);
-    std::memset(buf->Writable().data(), 0xCD, 64);
-    buf->Commit(64);
-    ASSERT_TRUE(sess->Send(std::move(buf)).has_value());
+    bool saw_overflow = false;
+    for (int i = 0; i < 16; ++i) {
+        auto buf_result = pool_.Allocate(64);
+        ASSERT_TRUE(buf_result.has_value());
+        auto buf = std::move(*buf_result);
+        std::memset(buf->Writable().data(), 0, 64);
+        buf->Commit(64);
+        auto result = sess->Send(std::move(buf));
+        if (!result.has_value()) {
+            saw_overflow = true;
+            break;
+        }
+    }
 
-    EXPECT_TRUE(sess->BackpressureActive());
-    ASSERT_EQ(transitions.size(), 1u);
-    EXPECT_TRUE(transitions.front());
-
-    std::byte tmp[256];
-    ASSERT_GT(::recv(remote_fd, tmp, sizeof(tmp), 0), 0);
-    DispatchUntil(*ring_, [&] { return !sess->BackpressureActive(); });
-
-    ASSERT_EQ(transitions.size(), 2u);
-    EXPECT_FALSE(transitions.back());
-
-    ::close(remote_fd);
-}
-
-TEST_F(SessionLifecycleTest, BackpressureCanPauseAndResumeOwnRecv) {
-    auto [local_fd, remote_fd] = MakeSocketPair();
-
-    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_, 8);
-    sess->SetBackpressureWatermarks(1, 0);
-    sess->SetPauseRecvOnBackpressure(true);
-    sess->Start();
-
-    auto buf_result = pool_.Allocate(2 * 1024 * 1024);
-    ASSERT_TRUE(buf_result.has_value());
-    auto buf = std::move(*buf_result);
-    std::memset(buf->Writable().data(), 0xAB, 2 * 1024 * 1024);
-    buf->Commit(2 * 1024 * 1024);
-    ASSERT_TRUE(sess->Send(std::move(buf)).has_value());
-    EXPECT_TRUE(sess->BackpressureActive());
-
-    ring_->Dispatch(std::chrono::milliseconds{20});
-    ASSERT_TRUE(sess->BackpressureActive());
-
-    ASSERT_EQ(::send(remote_fd, "paused", 6, MSG_NOSIGNAL), 6);
-    ring_->Dispatch(std::chrono::milliseconds{20});
-    EXPECT_EQ(sess->recv_count.load(std::memory_order_relaxed), 0);
-
-    std::byte tmp[256];
-    DispatchUntil(*ring_, [&] {
-        while (::recv(remote_fd, tmp, sizeof(tmp), MSG_DONTWAIT) > 0) {}
-        return !sess->BackpressureActive();
-    });
-    DispatchUntil(*ring_, [&] {
-        return sess->recv_bytes.load(std::memory_order_relaxed) == 6;
-    });
-
-    EXPECT_EQ(sess->recv_bytes.load(std::memory_order_relaxed), 6);
-
-    ::close(remote_fd);
-}
-
-TEST_F(SessionLifecycleTest, HighWatermarkCanDisconnectSlowClient) {
-    auto [local_fd, remote_fd] = MakeSocketPair();
-
-    auto sess = std::make_shared<TestSession>(local_fd, *ring_, pool_, 16);
-    std::atomic<int> transitions{0};
-    sess->SetBackpressureWatermarks(1, 0);
-    sess->SetDisconnectOnHighWatermark(true);
-    sess->SetBackpressureCallback([&](SessionRef, bool) {
-        transitions.fetch_add(1, std::memory_order_relaxed);
-    });
-    sess->Start();
-
-    auto buf_result = pool_.Allocate(64);
-    ASSERT_TRUE(buf_result.has_value());
-    auto buf = std::move(*buf_result);
-    std::memset(buf->Writable().data(), 0xEF, 64);
-    buf->Commit(64);
-    ASSERT_TRUE(sess->Send(std::move(buf)).has_value());
+    EXPECT_TRUE(saw_overflow);
 
     DispatchUntil(*ring_, [&] { return sess->disconnected.load(); });
 
-    EXPECT_TRUE(sess->BackpressureActive());
     EXPECT_TRUE(sess->Disconnecting());
     EXPECT_TRUE(sess->disconnected.load());
-    EXPECT_GE(transitions.load(std::memory_order_relaxed), 1);
 
     ::close(remote_fd);
 }
 
-// External shared_ptr release should not destroy Session while
-// self_ref_ keeps it alive during active I/O. Session is only
-// destroyed after all CQEs settle.
-TEST_F(SessionLifecycleTest, SelfRefRelease) {
+TEST_F(SessionLifecycleTest, ManagerRelease) {
     auto [local_fd, remote_fd] = MakeSocketPair();
 
     std::weak_ptr<TestSession> weak;
@@ -490,19 +325,13 @@ TEST_F(SessionLifecycleTest, SelfRefRelease) {
         weak = sess;
         sess->Start();
         EXPECT_TRUE(sess->connected.load());
-
-        // sess goes out of scope — only self_ref_ and weak remain
     }
 
-    // Session must still be alive (self_ref_ holds it)
     ASSERT_FALSE(weak.expired());
 
-    // Close peer to trigger disconnect path
     ::close(remote_fd);
 
     DispatchUntil(*ring_, [&] { return weak.expired(); });
 
-    // After all CQEs settle and TryRelease runs, self_ref_ is released
-    // and the weak_ptr expires.
     EXPECT_TRUE(weak.expired());
 }

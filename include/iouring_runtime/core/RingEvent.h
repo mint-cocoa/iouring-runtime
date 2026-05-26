@@ -2,16 +2,85 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <utility>
 
 #include <linux/time_types.h>  // struct __kernel_timespec (TimeoutEvent)
 #include <liburing.h>
 
 namespace iouring_runtime::core::ring {
 
-// Forward declaration — EventHandler receives CQE callbacks via virtual dispatch
 class EventHandler;
 using EventHandlerRef = std::shared_ptr<EventHandler>;
+
+class DrainGate {
+public:
+    class Token {
+    public:
+        Token() = default;
+        explicit Token(DrainGate& gate) noexcept : gate_(&gate) {
+            ++gate_->count_;
+        }
+
+        Token(Token&& other) noexcept
+            : gate_(std::exchange(other.gate_, nullptr)) {}
+
+        Token& operator=(Token&& other) noexcept {
+            if (this != &other) {
+                Reset();
+                gate_ = std::exchange(other.gate_, nullptr);
+            }
+            return *this;
+        }
+
+        Token(const Token&) = delete;
+        Token& operator=(const Token&) = delete;
+
+        ~Token() {
+            Reset();
+        }
+
+        void Reset() noexcept {
+            if (!gate_) {
+                return;
+            }
+            auto* gate = std::exchange(gate_, nullptr);
+            --gate->count_;
+            gate->OnLeave();
+        }
+
+        explicit operator bool() const noexcept { return gate_ != nullptr; }
+
+    private:
+        DrainGate* gate_ = nullptr;
+    };
+
+    Token Enter() noexcept { return Token(*this); }
+
+    void SetOnDrained(std::move_only_function<void()> on_drained) {
+        on_drained_ = std::move(on_drained);
+    }
+
+    void Close() {
+        closing_ = true;
+        OnLeave();
+    }
+
+    [[nodiscard]] bool Drained() const noexcept { return count_ == 0; }
+    [[nodiscard]] int Count() const noexcept { return count_; }
+
+private:
+    void OnLeave() {
+        if (closing_ && count_ == 0 && on_drained_) {
+            on_drained_();
+        }
+    }
+
+    int count_ = 0;
+    bool closing_ = false;
+    std::move_only_function<void()> on_drained_;
+};
 
 // -- Event types ----
 
@@ -28,22 +97,22 @@ enum class EventType : std::uint8_t {
     kTimeout,
 };
 
-// Base operation context — stored as io_uring SQE user_data and carried back
-// by the CQE. Heap-allocated ops hold their owner alive until final CQE.
+// Base operation context stored as io_uring SQE user_data and carried back by
+// the CQE. Heap-allocated ops hold their owner alive until final CQE.
 class IoEvent {
 public:
     explicit IoEvent(EventType type) noexcept : type_(type) {}
     virtual ~IoEvent() = default;
 
-    virtual void Init() { strong_owner_.reset(); }
     virtual bool Complete(std::int32_t /*result*/, std::uint32_t /*flags*/) const {
         return true;
     }
 
     EventType Type() const noexcept { return type_; }
 
-    EventHandlerRef Owner() const { return strong_owner_; }
-    void SetStrongOwner(EventHandlerRef o) { strong_owner_ = std::move(o); }
+    EventHandlerRef Owner() const { return owner_ptr_; }
+    void SetStrongOwner(EventHandlerRef owner_ptr) { owner_ptr_ = std::move(owner_ptr); }
+    void SetDrainToken(DrainGate::Token token) { drain_token_ = std::move(token); }
 
     bool AutoDelete() const noexcept { return auto_delete_; }
     void SetAutoDelete(bool value) noexcept { auto_delete_ = value; }
@@ -62,9 +131,21 @@ public:
 
 private:
     EventType type_;
-    EventHandlerRef strong_owner_;
+    EventHandlerRef owner_ptr_;
+    DrainGate::Token drain_token_;
     bool auto_delete_{false};
     bool retain_after_dispatch_{false};
+};
+
+// Convenience wrapper for constructing an event with a strong owner.
+template <class EventT>
+class StrongOwnedEvent : public EventT {
+public:
+    template <class... Args>
+    explicit StrongOwnedEvent(EventHandlerRef owner_ptr, Args&&... args)
+        : EventT(std::forward<Args>(args)...) {
+        this->SetStrongOwner(std::move(owner_ptr));
+    }
 };
 
 // -- Concrete events ----
@@ -78,11 +159,6 @@ public:
 class RecvEvent : public IoEvent {
 public:
     RecvEvent() : IoEvent(EventType::kRecv) {}
-
-    void Init() override {
-        IoEvent::Init();
-        buffer_id_ = 0;
-    }
 
     std::uint16_t BufferId() const noexcept { return buffer_id_; }
     void SetBufferId(std::uint16_t id) noexcept { buffer_id_ = id; }
@@ -105,11 +181,6 @@ public:
 class SendEvent : public IoEvent {
 public:
     SendEvent() : IoEvent(EventType::kSend) {}
-
-    void Init() override {
-        IoEvent::Init();
-        requested_bytes_ = 0;
-    }
 
     std::size_t RequestedBytes() const noexcept { return requested_bytes_; }
     void SetRequestedBytes(std::size_t n) noexcept { requested_bytes_ = n; }
@@ -153,6 +224,13 @@ public:
     TimeoutEvent() : IoEvent(EventType::kTimeout) {}
     struct __kernel_timespec ts{};
 };
+
+using StrongAcceptEvent = StrongOwnedEvent<AcceptEvent>;
+using StrongCancelEvent = StrongOwnedEvent<CancelEvent>;
+using StrongConnectEvent = StrongOwnedEvent<ConnectEvent>;
+using StrongPollEvent = StrongOwnedEvent<PollEvent>;
+using StrongTimeoutEvent = StrongOwnedEvent<TimeoutEvent>;
+using StrongWriteEvent = StrongOwnedEvent<WriteEvent>;
 
 inline bool RecvEvent::Complete(std::int32_t /*result*/,
                                 std::uint32_t flags) const {

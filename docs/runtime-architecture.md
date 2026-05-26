@@ -28,13 +28,11 @@ Core owns:
 
 - `io_uring` creation and dispatch
 - listener accept flow
-- session lifecycle and self-ownership
+- session lifecycle and operation-owned drain
 - recv registration
 - send queue draining and short-write retry
 - send/recv buffers
-- inactivity timeout hooks
 - job queues and timers
-- backpressure policy
 
 Core does not own:
 
@@ -58,7 +56,7 @@ Listener::Start
 ring.Dispatch loop
 Session::OnRecv
 Session::Send
-Session::Disconnect or DisconnectAfterFlush
+Session::Disconnect
 ```
 
 `Worker` is the standard execution unit: one thread, one `IoRing`, one

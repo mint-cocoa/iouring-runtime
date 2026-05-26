@@ -34,6 +34,7 @@ find_package(Threads REQUIRED)
 option(BUILD_WEB "Build the optional HTTP web module" OFF)
 option(BUILD_PROXY "Build the optional TCP proxy module" OFF)
 option(BUILD_GAME "Build the optional multiplayer game packet module" OFF)
+option(BUILD_MEDIA "Build the optional media helpers module" OFF)
 
 if(BUILD_WEB)
     FetchContent_Declare(
@@ -109,6 +110,7 @@ add_library(Runtime STATIC
     src/runtime/common/CpuAffinity.cpp
     src/runtime/ring/RingBuffer.cpp
     src/runtime/ring/IoRing.cpp
+    src/runtime/io/SessionManager.cpp
     src/runtime/io/Session.cpp
     src/runtime/io/SessionSend.cpp
     src/runtime/io/Listener.cpp
@@ -139,21 +141,23 @@ target_link_libraries(Runtime
 
 target_compile_options(Runtime PRIVATE -Wall -Wextra -Wpedantic)
 
-add_library(RuntimeMedia STATIC
-    src/modules/media/Hls.cpp
-)
+if(BUILD_MEDIA)
+    add_library(RuntimeMedia STATIC
+        src/modules/media/Hls.cpp
+    )
 
-add_library(${IORUNTIME_MEDIA_PACKAGE_NAME}::RuntimeMedia ALIAS RuntimeMedia)
-add_library(${IORUNTIME_PACKAGE_NAME}::RuntimeMedia ALIAS RuntimeMedia)
-add_library(iouring::RuntimeMedia ALIAS RuntimeMedia)
+    add_library(${IORUNTIME_MEDIA_PACKAGE_NAME}::RuntimeMedia ALIAS RuntimeMedia)
+    add_library(${IORUNTIME_PACKAGE_NAME}::RuntimeMedia ALIAS RuntimeMedia)
+    add_library(iouring::RuntimeMedia ALIAS RuntimeMedia)
 
-target_include_directories(RuntimeMedia
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-)
+    target_include_directories(RuntimeMedia
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
 
-target_compile_options(RuntimeMedia PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(RuntimeMedia PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 
 if(BUILD_WEB)
     add_library(RuntimeWeb STATIC
@@ -252,7 +256,7 @@ if(BUILD_GAME)
     target_compile_options(RuntimeGame PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-option(BUILD_EXAMPLES "Build runtime examples" ON)
+option(BUILD_EXAMPLES "Build runtime examples" OFF)
 set(_EXAMPLE_DIRS
     app/examples/runtime/core_echo
     app/examples/runtime/core_idle_echo
@@ -293,7 +297,7 @@ if(BUILD_EXAMPLES)
     endforeach()
 endif()
 
-option(BUILD_ACTIVITY_SERVER "Build the C++ Activity backend server" ON)
+option(BUILD_ACTIVITY_SERVER "Build the C++ Activity backend server" OFF)
 if(BUILD_ACTIVITY_SERVER)
     add_subdirectory(app/activity-server)
 endif()
@@ -313,8 +317,13 @@ if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+set(_runtime_install_targets Runtime RuntimeObservability)
+if(BUILD_MEDIA)
+    list(APPEND _runtime_install_targets RuntimeMedia)
+endif()
+
 install(
-    TARGETS Runtime RuntimeObservability RuntimeMedia
+    TARGETS ${_runtime_install_targets}
     EXPORT ${IORUNTIME_PACKAGE_NAME}Targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -332,10 +341,12 @@ if(BUILD_WEB)
     )
 endif()
 
-install(
-    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/media"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
-)
+if(BUILD_MEDIA)
+    install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/iouring_runtime/media"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/iouring_runtime"
+    )
+endif()
 
 if(BUILD_PROXY)
     install(
