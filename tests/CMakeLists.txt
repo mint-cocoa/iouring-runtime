@@ -100,4 +100,10 @@ if(BUILD_GAME)
     add_executable(test_room_manager game/test_room_manager.cpp)
     target_link_libraries(test_room_manager PRIVATE RuntimeGame GTest::gtest_main)
     add_test(NAME test_room_manager COMMAND test_room_manager)
+
+    add_executable(test_outbound_mailbox
+        game/test_outbound_mailbox.cpp
+        ../app/examples/game/dungeon_full_server/src/net/outbound_mailbox.cpp)
+    target_link_libraries(test_outbound_mailbox PRIVATE RuntimeGame GTest::gtest_main)
+    add_test(NAME test_outbound_mailbox COMMAND test_outbound_mailbox)
 endif()

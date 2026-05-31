@@ -53,7 +53,7 @@ void GameSession::OnPacket(std::uint16_t msg_id,
         default: break;
     }
 
-    if (state_ == SessionState::InRoom) {
+    if (state_ == ::SessionState::InRoom) {
         HandleInRoomPacket(msg_id, data, len);
     } else {
         HandlePreRoomPacket(msg_id, data, len);

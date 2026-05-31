@@ -27,7 +27,7 @@ public:
 
     IoWorker*       GetWorker()      const { return worker_; }
     PlayerContext*  GetPlayerCtx()   const { return player_ctx_; }
-    SessionState    GetState()       const { return state_; }
+    ::SessionState  GetState()       const { return state_; }
     DbService*      GetDbService()   const { return db_service_; }
     PlayerManager*  GetPlayerManager() const { return player_mgr_; }
     RoomManager*    GetRoomManager() const { return room_mgr_; }
@@ -37,7 +37,7 @@ public:
     iouring_runtime::core::buffer::BufferPool& GetPool() { return Pool(); }
 
     void SetPlayerCtx(PlayerContext* ctx) { player_ctx_ = ctx; }
-    void SetState(SessionState s) { state_ = s; }
+    void SetState(::SessionState s) { state_ = s; }
 
     void SetServices(PlayerManager* pm, RoomManager* rm, DbService* db);
 
@@ -65,7 +65,7 @@ private:
 
     IoWorker* worker_;
     PlayerContext* player_ctx_ = nullptr;
-    SessionState state_ = SessionState::Connected;
+    ::SessionState state_ = ::SessionState::Connected;
 
     PlayerManager* player_mgr_ = nullptr;
     RoomManager*   room_mgr_   = nullptr;

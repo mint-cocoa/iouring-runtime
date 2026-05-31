@@ -24,6 +24,7 @@ add_executable(dungeon_full_server
     src/main.cpp
     src/net/io_worker.cpp
     src/net/io_worker_pool.cpp
+    src/net/outbound_mailbox.cpp
     src/game/player_context.cpp
     src/net/game_session.cpp
     src/game/room.cpp

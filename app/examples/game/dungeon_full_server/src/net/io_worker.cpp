@@ -1,6 +1,9 @@
 #include "io_worker.h"
 #include <spdlog/spdlog.h>
 
+#include <cassert>
+#include <utility>
+
 using namespace iouring_runtime::core;
 using namespace iouring_runtime::core::ring;
 using namespace iouring_runtime::core::io;
@@ -52,11 +55,50 @@ void IoWorker::Run() {
     while (running_) {
         ring_->Dispatch(std::chrono::milliseconds(1));
         ring_->ProcessPostedTasks();
+        DrainOutbox();
         timer_.DistributeExpired();
-        while (auto* q = global_queue_.TryPop())
+        while (auto* q = global_queue_.TryPop()) {
             q->Execute(std::chrono::steady_clock::now()
                        + std::chrono::milliseconds(8));
+            DrainOutbox();
+        }
+        DrainOutbox();
     }
+}
+
+void IoWorker::EnqueueOutbound(OutboundMessage msg) {
+    if (!ring_) {
+        return;
+    }
+    outbox_.Enqueue(std::move(msg));
+    Wake();
+}
+
+void IoWorker::Wake() {
+    if (ring_) {
+        ring_->Post([] {});
+    }
+}
+
+void IoWorker::DrainOutbox() {
+    assert(Ring() == IoRing::Current());
+
+    outbox_.DrainBudgeted([this](OutboundMessage msg) {
+        if (msg.task) {
+            msg.task();
+        }
+
+        if (!msg.buffer) {
+            return;
+        }
+
+        auto* session = FindSession(msg.session_id);
+        if (!session || session->Disconnecting()) {
+            return;
+        }
+
+        (void)session->Send(std::move(msg.buffer));
+    });
 }
 
 void IoWorker::AddSession(SessionId sid, SessionRef session) {

@@ -16,6 +16,7 @@
 #include <string>
 
 class IoWorkerPool;
+class RoomManager;
 
 struct PlayerState {
     PlayerId player_id = 0;
@@ -75,8 +76,13 @@ public:
     void               MarkEmpty() { empty_since_ = std::chrono::steady_clock::now(); }
     void               ClearEmpty() { empty_since_ = TimePoint{}; }
 
+    void AddPlayer(const PlayerContext& ctx, float spawn_x = 0, float spawn_y = 0.5f, float spawn_z = 0);
     void AddPlayer(PlayerContext* ctx, float spawn_x = 0, float spawn_y = 0.5f, float spawn_z = 0);
     void RemovePlayer(PlayerId pid);
+    void TryCreateEnter(PlayerContext ctx);
+    void TryJoin(PlayerContext ctx);
+    void TryPortal(PlayerContext ctx, RoomManager* room_manager,
+                   std::uint32_t portal_id);
 
     // Server-Initiated Flow Control: called when the client signals that
     // its game scene is fully loaded and its packet handlers are ready.
@@ -94,6 +100,7 @@ public:
     void BroadcastAll(MsgId msg_id, iouring_runtime::core::buffer::SendBufferRef buf);
     void BroadcastExcept(PlayerId exclude, MsgId msg_id,
                          iouring_runtime::core::buffer::SendBufferRef buf);
+    std::uint64_t NextRoomSeqForOutbox() { return next_room_seq_++; }
 
     template<iouring_runtime::core::ProtobufMessage T>
     void SendTo(PlayerState& ps, MsgId msg_id, const T& proto) {
@@ -144,6 +151,8 @@ protected:
                   std::span<const std::byte> payload) override;
 
 private:
+    void EnterFromPortal(PlayerContext ctx, RoomId old_room_id);
+
     static constexpr std::uint32_t kMaxPlayers = 500;
     static constexpr auto kTickInterval = std::chrono::milliseconds(50);
     static constexpr int kScoreboardTicks = 100;  // 100 * 50ms = 5s
@@ -158,6 +167,7 @@ private:
     DungeonGenerator dungeon_;
     std::unordered_map<uint64_t, GroundItem> ground_items_;
     uint64_t nextGroundId_ = 1;
+    std::uint64_t next_room_seq_ = 1;
     std::unordered_map<uint32_t, RoomId> connections_;
     TimePoint empty_since_{};
     int depth_ = 0;

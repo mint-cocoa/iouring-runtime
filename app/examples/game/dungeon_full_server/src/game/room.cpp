@@ -1,16 +1,22 @@
 #include "room.h"
+#include "room_manager.h"
 #include "../net/io_worker_pool.h"
 #include "../net/io_worker.h"
+#include "../net/game_session.h"
 #include "../handler/game_handler.h"
 #include "../handler/social_handler.h"
 #include "../system/combat_system.h"
 #include <spdlog/spdlog.h>
 
 #include "Game.pb.h"
+#include "Auth.pb.h"
 #include "Common.pb.h"
 #include "Inventory.pb.h"
 
+#include <algorithm>
 #include <utility>
+#include <memory>
+#include <random>
 
 Room::Room(RoomId id, std::string name,
            iouring_runtime::core::job::GlobalQueue& gq,
@@ -24,21 +30,119 @@ iouring_runtime::core::buffer::BufferPool& Room::GetPool() {
     return workers_->GetWorker(0)->Pool();
 }
 
+namespace {
+
+void GenerateMapForRoom(Room& room) {
+    auto seed = std::to_string(room.Id()) + "_" + room.Name();
+    int depth = room.Depth();
+
+    room.GetDungeon().Generate(seed, 3, depth);
+
+    game::MapData md;
+    room.GetDungeon().FillMapData(md);
+    room.SetMapData(std::move(md));
+
+    spdlog::info("Room[{}]: dungeon generated, grid={}x{}, props={}, lights={}",
+                 room.Id(),
+                 room.MapData().grid_width(),
+                 room.MapData().grid_height(),
+                 room.MapData().props_size(),
+                 room.MapData().lights_size());
+}
+
+template<iouring_runtime::core::ProtobufMessage T>
+void EnqueuePacket(IoWorkerPool* workers, Room& room,
+                   iouring_runtime::core::SessionId sid,
+                   iouring_runtime::core::ContextId wid, MsgId msg_id,
+                   const T& proto) {
+    auto* worker = workers->GetWorker(wid);
+    if (!worker) {
+        return;
+    }
+
+    auto buffer = iouring_runtime::game::PacketBuilder::Build(
+        worker->Pool(), static_cast<iouring_runtime::game::PacketId>(msg_id),
+        proto);
+    if (!buffer) {
+        return;
+    }
+
+    worker->EnqueueOutbound(OutboundMessage{
+        .session_id = sid,
+        .room_id = room.Id(),
+        .room_seq = room.NextRoomSeqForOutbox(),
+        .buffer = std::move(buffer),
+    });
+}
+
+void EnqueueSessionEnterState(IoWorkerPool* workers, Room& room,
+                              const PlayerContext& request) {
+    auto* worker = workers->GetWorker(request.worker_id);
+    if (!worker) {
+        return;
+    }
+
+    auto weak = request.session;
+    const auto player_id = request.player_id;
+    worker->EnqueueOutbound(OutboundMessage{
+        .session_id = request.session_id,
+        .room_id = room.Id(),
+        .room_seq = room.NextRoomSeqForOutbox(),
+        .task = [weak = std::move(weak), player_id, room = &room] {
+            auto base = weak.lock();
+            if (!base) {
+                return;
+            }
+
+            auto session = std::dynamic_pointer_cast<GameSession>(base);
+            if (!session) {
+                return;
+            }
+
+            auto* ctx = session->GetPlayerCtx();
+            if (!ctx || ctx->player_id != player_id) {
+                return;
+            }
+
+            ctx->room = room;
+            session->SetState(SessionState::InRoom);
+        },
+    });
+}
+
+bool PickSpawn(Room& room, float& x, float& z) {
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    if (room.GetDungeon().GetRandomFloorPosition(rng, x, z)) {
+        return true;
+    }
+
+    auto& spawn = room.SpawnPosition();
+    x = spawn.x();
+    z = spawn.z();
+    return false;
+}
+
+} // namespace
+
 void Room::SendTo(PlayerState& ps, MsgId msg_id,
                   iouring_runtime::core::buffer::SendBufferRef buf) {
+    (void)msg_id;
     if (!buf || !ps.worker_ring) return;  // bots have no session
     auto sid = ps.session_id;
     auto wid = ps.worker_id;
     auto* worker = workers_->GetWorker(wid);
     if (!worker) return;
 
-    worker->Ring()->RunOnRing([worker, sid, buf = std::move(buf)] {
-        auto* sess = worker->FindSession(sid);
-        if (sess) sess->Send(std::move(buf));
+    worker->EnqueueOutbound(OutboundMessage{
+        .session_id = sid,
+        .room_id = Id(),
+        .room_seq = next_room_seq_++,
+        .buffer = std::move(buf),
     });
 }
 
 void Room::BroadcastAll(MsgId msg_id, iouring_runtime::core::buffer::SendBufferRef buf) {
+    (void)msg_id;
     if (!buf) return;
     for (auto& [_, ps] : players_) {
         if (ps.session_id == 0) continue;   // bot — no session to send to
@@ -48,15 +152,18 @@ void Room::BroadcastAll(MsgId msg_id, iouring_runtime::core::buffer::SendBufferR
         auto* worker = workers_->GetWorker(wid);
         if (!worker) continue;
 
-        worker->Ring()->RunOnRing([worker, sid, buf] {
-            auto* sess = worker->FindSession(sid);
-            if (sess) sess->Send(buf);
+        worker->EnqueueOutbound(OutboundMessage{
+            .session_id = sid,
+            .room_id = Id(),
+            .room_seq = next_room_seq_++,
+            .buffer = buf,
         });
     }
 }
 
 void Room::BroadcastExcept(PlayerId exclude, MsgId msg_id,
                            iouring_runtime::core::buffer::SendBufferRef buf) {
+    (void)msg_id;
     if (!buf) return;
     for (auto& [pid, ps] : players_) {
         if (pid == exclude) continue;
@@ -67,14 +174,206 @@ void Room::BroadcastExcept(PlayerId exclude, MsgId msg_id,
         auto* worker = workers_->GetWorker(wid);
         if (!worker) continue;
 
-        worker->Ring()->RunOnRing([worker, sid, buf] {
-            auto* sess = worker->FindSession(sid);
-            if (sess) sess->Send(buf);
+        worker->EnqueueOutbound(OutboundMessage{
+            .session_id = sid,
+            .room_id = Id(),
+            .room_seq = next_room_seq_++,
+            .buffer = buf,
         });
     }
 }
 
-void Room::AddPlayer(PlayerContext* ctx, float spawn_x, float spawn_y, float spawn_z) {
+void Room::TryCreateEnter(PlayerContext ctx) {
+    if (ctx.session.expired()) {
+        return;
+    }
+
+    GenerateMapForRoom(*this);
+
+    float spawn_x = 0.0f;
+    float spawn_z = 0.0f;
+    PickSpawn(*this, spawn_x, spawn_z);
+
+    SpawnBots(15);
+    AddPlayer(ctx, spawn_x, 0.5f, spawn_z);
+    EnqueueSessionEnterState(workers_, *this, ctx);
+
+    auto skill_data = CombatSystem::BuildSkillDataPacket();
+    EnqueuePacket(workers_, *this, ctx.session_id, ctx.worker_id,
+                  MsgId::S_SKILL_DATA, skill_data);
+
+    game::S_CreateRoom reply;
+    reply.set_success(true);
+    reply.set_zone_id(Id());
+    auto* pi = reply.mutable_player();
+    pi->set_player_id(ctx.player_id);
+    pi->set_name(ctx.char_name);
+    pi->set_hp(100);
+    pi->set_max_hp(100);
+    pi->set_level(ctx.level);
+    auto* pos = pi->mutable_position();
+    pos->set_x(spawn_x);
+    pos->set_y(0.5f);
+    pos->set_z(spawn_z);
+    *reply.mutable_map_data() = MapData();
+    EnqueuePacket(workers_, *this, ctx.session_id, ctx.worker_id,
+                  MsgId::S_CREATE_ROOM, reply);
+}
+
+void Room::TryJoin(PlayerContext ctx) {
+    if (ctx.session.expired()) {
+        return;
+    }
+
+    if (players_.size() >= kMaxPlayers) {
+        game::S_JoinRoom reply;
+        reply.set_success(false);
+        reply.set_error("Room is full");
+        EnqueuePacket(workers_, *this, ctx.session_id, ctx.worker_id,
+                      MsgId::S_JOIN_ROOM, reply);
+        return;
+    }
+
+    float spawn_x = 0.0f;
+    float spawn_z = 0.0f;
+    PickSpawn(*this, spawn_x, spawn_z);
+
+    AddPlayer(ctx, spawn_x, 0.5f, spawn_z);
+    EnqueueSessionEnterState(workers_, *this, ctx);
+
+    auto skill_data = CombatSystem::BuildSkillDataPacket();
+    EnqueuePacket(workers_, *this, ctx.session_id, ctx.worker_id,
+                  MsgId::S_SKILL_DATA, skill_data);
+
+    game::S_JoinRoom reply;
+    reply.set_success(true);
+    reply.set_zone_id(Id());
+    auto* pi = reply.mutable_player();
+    pi->set_player_id(ctx.player_id);
+    pi->set_name(ctx.char_name);
+    pi->set_hp(100);
+    pi->set_max_hp(100);
+    pi->set_level(ctx.level);
+    auto* pos = pi->mutable_position();
+    pos->set_x(spawn_x);
+    pos->set_y(0.5f);
+    pos->set_z(spawn_z);
+    *reply.mutable_map_data() = MapData();
+    EnqueuePacket(workers_, *this, ctx.session_id, ctx.worker_id,
+                  MsgId::S_JOIN_ROOM, reply);
+}
+
+void Room::TryPortal(PlayerContext ctx, RoomManager* room_manager,
+                     std::uint32_t portal_id) {
+    if (!room_manager || ctx.session.expired()) {
+        return;
+    }
+
+    auto& portals = dungeon_.GetPortals();
+    if (portal_id >= portals.size()) {
+        return;
+    }
+
+    Room* new_room = nullptr;
+    auto connection = connections_.find(portal_id);
+    if (connection != connections_.end()) {
+        new_room = room_manager->FindRoom(connection->second);
+        if (!new_room) {
+            connections_.erase(connection);
+        }
+    }
+
+    if (!new_room) {
+        const int new_depth = depth_ + 1;
+        std::string name = "Zone_" + std::to_string(room_manager->NextId());
+        new_room = room_manager->CreateRoom(name);
+        if (!new_room) {
+            game::S_Portal reply;
+            reply.set_success(false);
+            reply.set_error("Failed to create zone");
+            EnqueuePacket(workers_, *this, ctx.session_id, ctx.worker_id,
+                          MsgId::S_PORTAL, reply);
+            return;
+        }
+
+        connections_[portal_id] = new_room->Id();
+        const auto old_room_id = Id();
+        const auto bot_count = std::min(10 + new_depth * 3, 30);
+        new_room->Push([new_room, old_room_id, new_depth, bot_count,
+                        ctx = std::move(ctx)] mutable {
+            new_room->SetDepth(new_depth);
+            GenerateMapForRoom(*new_room);
+            new_room->SpawnBots(bot_count);
+
+            auto& new_portals = new_room->GetDungeon().GetPortals();
+            auto& new_connections = new_room->Connections();
+            for (std::uint32_t i = 0; i < new_portals.size(); ++i) {
+                if (!new_connections.contains(i)) {
+                    new_connections[i] = old_room_id;
+                    break;
+                }
+            }
+
+            new_room->EnterFromPortal(std::move(ctx), old_room_id);
+        });
+    } else {
+        const auto old_room_id = Id();
+        new_room->Push([new_room, old_room_id, ctx = std::move(ctx)] mutable {
+            new_room->EnterFromPortal(std::move(ctx), old_room_id);
+        });
+    }
+
+    RemovePlayer(ctx.player_id);
+}
+
+void Room::EnterFromPortal(PlayerContext ctx, RoomId old_room_id) {
+    if (ctx.session.expired()) {
+        return;
+    }
+
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    float spawn_x = 0.0f;
+    float spawn_z = 0.0f;
+    bool found_portal_spawn = false;
+
+    auto& portals = dungeon_.GetPortals();
+    for (std::uint32_t i = 0; i < portals.size(); ++i) {
+        auto connection = connections_.find(i);
+        if (connection != connections_.end() && connection->second == old_room_id) {
+            std::uniform_real_distribution<float> offset(-2.0f, 2.0f);
+            spawn_x = portals[i].x + offset(rng);
+            spawn_z = portals[i].z + offset(rng);
+            found_portal_spawn = true;
+            break;
+        }
+    }
+
+    if (!found_portal_spawn) {
+        PickSpawn(*this, spawn_x, spawn_z);
+    }
+
+    game::S_Portal reply;
+    reply.set_success(true);
+    reply.set_zone_id(Id());
+    auto* pi = reply.mutable_player();
+    pi->set_player_id(ctx.player_id);
+    pi->set_name(ctx.char_name);
+    pi->set_hp(100);
+    pi->set_max_hp(100);
+    pi->set_level(ctx.level);
+    auto* pos = pi->mutable_position();
+    pos->set_x(spawn_x);
+    pos->set_y(0.5f);
+    pos->set_z(spawn_z);
+    *reply.mutable_map_data() = MapData();
+
+    EnqueueSessionEnterState(workers_, *this, ctx);
+    EnqueuePacket(workers_, *this, ctx.session_id, ctx.worker_id,
+                  MsgId::S_PORTAL, reply);
+    AddPlayer(ctx, spawn_x, 0.5f, spawn_z);
+}
+
+void Room::AddPlayer(const PlayerContext& ctx, float spawn_x, float spawn_y, float spawn_z) {
     // Jitter spawn to avoid stacking on the same position
     static thread_local std::mt19937 rng{std::random_device{}()};
     std::uniform_real_distribution<float> jitter(-2.0f, 2.0f);
@@ -86,26 +385,33 @@ void Room::AddPlayer(PlayerContext* ctx, float spawn_x, float spawn_y, float spa
     if (dungeon_.GetTile(gx, gz) != 0) { jx = spawn_x; jz = spawn_z; }
 
     PlayerState ps;
-    ps.player_id = ctx->player_id;
-    ps.name = ctx->char_name;
-    ps.level = ctx->level;
+    ps.player_id = ctx.player_id;
+    ps.name = ctx.char_name;
+    ps.level = ctx.level;
     ps.hp = 100;
     ps.max_hp = 100;
     ps.pos_x = jx;
     ps.pos_y = spawn_y;
     ps.pos_z = jz;
-    ps.worker_ring = ctx->worker_ring;
-    ps.session_id = ctx->session_id;
-    ps.worker_id = ctx->worker_id;
+    ps.worker_ring = ctx.worker_ring;
+    ps.session_id = ctx.session_id;
+    ps.worker_id = ctx.worker_id;
     // scene_ready stays false until the client sends C_SCENE_READY.
     // While false, the player is excluded from all broadcasts and will
     // NOT receive the initial snapshot — that is sent by HandleSceneReady.
 
     players_[ps.player_id] = std::move(ps);
-    iouring_runtime::game::Room::AddPlayer({ctx->player_id});
+    iouring_runtime::game::Room::AddPlayer({ctx.player_id});
     ClearEmpty();
     spdlog::info("Room[{}]: player {} joined at ({:.1f},{:.1f},{:.1f}), count={}",
-                 Id(), ctx->player_id, spawn_x, spawn_y, spawn_z, players_.size());
+                 Id(), ctx.player_id, spawn_x, spawn_y, spawn_z, players_.size());
+}
+
+void Room::AddPlayer(PlayerContext* ctx, float spawn_x, float spawn_y, float spawn_z) {
+    if (!ctx) {
+        return;
+    }
+    AddPlayer(*ctx, spawn_x, spawn_y, spawn_z);
 }
 
 void Room::HandleSceneReady(PlayerId pid) {
