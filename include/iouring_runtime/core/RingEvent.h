@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <utility>
 
@@ -14,73 +13,17 @@ namespace iouring_runtime::core::ring {
 class EventHandler;
 using EventHandlerRef = std::shared_ptr<EventHandler>;
 
-class DrainGate {
-public:
-    class Token {
-    public:
-        Token() = default;
-        explicit Token(DrainGate& gate) noexcept : gate_(&gate) {
-            ++gate_->count_;
-        }
-
-        Token(Token&& other) noexcept
-            : gate_(std::exchange(other.gate_, nullptr)) {}
-
-        Token& operator=(Token&& other) noexcept {
-            if (this != &other) {
-                Reset();
-                gate_ = std::exchange(other.gate_, nullptr);
-            }
-            return *this;
-        }
-
-        Token(const Token&) = delete;
-        Token& operator=(const Token&) = delete;
-
-        ~Token() {
-            Reset();
-        }
-
-        void Reset() noexcept {
-            if (!gate_) {
-                return;
-            }
-            auto* gate = std::exchange(gate_, nullptr);
-            --gate->count_;
-            gate->OnLeave();
-        }
-
-        explicit operator bool() const noexcept { return gate_ != nullptr; }
-
-    private:
-        DrainGate* gate_ = nullptr;
-    };
-
-    Token Enter() noexcept { return Token(*this); }
-
-    void SetOnDrained(std::move_only_function<void()> on_drained) {
-        on_drained_ = std::move(on_drained);
-    }
-
-    void Close() {
-        closing_ = true;
-        OnLeave();
-    }
-
-    [[nodiscard]] bool Drained() const noexcept { return count_ == 0; }
-    [[nodiscard]] int Count() const noexcept { return count_; }
-
-private:
-    void OnLeave() {
-        if (closing_ && count_ == 0 && on_drained_) {
-            on_drained_();
-        }
-    }
-
-    int count_ = 0;
-    bool closing_ = false;
-    std::move_only_function<void()> on_drained_;
+enum class DispatchResult : std::uint8_t {
+    kComplete,
+    kPending,
+    kRearmed,
 };
+
+inline DispatchResult MultishotDispatchResult(std::uint32_t flags) noexcept {
+    return (flags & IORING_CQE_F_MORE) != 0
+        ? DispatchResult::kPending
+        : DispatchResult::kComplete;
+}
 
 // -- Event types ----
 
@@ -104,37 +47,30 @@ public:
     explicit IoEvent(EventType type) noexcept : type_(type) {}
     virtual ~IoEvent() = default;
 
-    virtual bool Complete(std::int32_t /*result*/, std::uint32_t /*flags*/) const {
-        return true;
-    }
-
     EventType Type() const noexcept { return type_; }
+    DispatchResult DefaultDispatchResult(std::uint32_t flags) const noexcept {
+        switch (type_) {
+            case EventType::kAccept:
+            case EventType::kRecv:
+                return MultishotDispatchResult(flags);
+            default:
+                return DispatchResult::kComplete;
+        }
+    }
 
     EventHandlerRef Owner() const { return owner_ptr_; }
     void SetStrongOwner(EventHandlerRef owner_ptr) { owner_ptr_ = std::move(owner_ptr); }
-    void SetDrainToken(DrainGate::Token token) { drain_token_ = std::move(token); }
 
     bool AutoDelete() const noexcept { return auto_delete_; }
     void SetAutoDelete(bool value) noexcept { auto_delete_ = value; }
-    void RetainAfterDispatch() noexcept { retain_after_dispatch_ = true; }
-    bool ShouldDeleteAfterDispatch(std::int32_t result,
-                                   std::uint32_t flags) noexcept {
-        if (!auto_delete_) {
-            return false;
-        }
-        if (retain_after_dispatch_) {
-            retain_after_dispatch_ = false;
-            return false;
-        }
-        return Complete(result, flags);
+    bool ShouldDeleteAfterDispatch(DispatchResult result) const noexcept {
+        return auto_delete_ && result == DispatchResult::kComplete;
     }
 
 private:
     EventType type_;
     EventHandlerRef owner_ptr_;
-    DrainGate::Token drain_token_;
     bool auto_delete_{false};
-    bool retain_after_dispatch_{false};
 };
 
 // Convenience wrapper for constructing an event with a strong owner.
@@ -153,7 +89,6 @@ public:
 class AcceptEvent : public IoEvent {
 public:
     AcceptEvent() : IoEvent(EventType::kAccept) {}
-    bool Complete(std::int32_t /*result*/, std::uint32_t flags) const override;
 };
 
 class RecvEvent : public IoEvent {
@@ -162,7 +97,6 @@ public:
 
     std::uint16_t BufferId() const noexcept { return buffer_id_; }
     void SetBufferId(std::uint16_t id) noexcept { buffer_id_ = id; }
-    bool Complete(std::int32_t /*result*/, std::uint32_t flags) const override;
 
 private:
     std::uint16_t buffer_id_{0};
@@ -231,15 +165,5 @@ using StrongConnectEvent = StrongOwnedEvent<ConnectEvent>;
 using StrongPollEvent = StrongOwnedEvent<PollEvent>;
 using StrongTimeoutEvent = StrongOwnedEvent<TimeoutEvent>;
 using StrongWriteEvent = StrongOwnedEvent<WriteEvent>;
-
-inline bool RecvEvent::Complete(std::int32_t /*result*/,
-                                std::uint32_t flags) const {
-    return (flags & IORING_CQE_F_MORE) == 0;
-}
-
-inline bool AcceptEvent::Complete(std::int32_t /*result*/,
-                                  std::uint32_t flags) const {
-    return (flags & IORING_CQE_F_MORE) == 0;
-}
 
 } // namespace iouring_runtime::core::ring

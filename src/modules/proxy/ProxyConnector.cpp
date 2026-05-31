@@ -99,6 +99,8 @@ void ProxyConnector::Cancel() {
             cancel_ev->SetAutoDelete(true);
             if (ring_.PrepCancel(*active_connect_ev_, cancel_ev)) {
                 ++pending_ops_;
+            } else {
+                delete cancel_ev;
             }
         }
     }
@@ -110,6 +112,8 @@ void ProxyConnector::Cancel() {
             cancel_ev->SetAutoDelete(true);
             if (ring_.PrepCancel(*active_timeout_ev_, cancel_ev)) {
                 ++pending_ops_;
+            } else {
+                delete cancel_ev;
             }
         }
         timeout_armed_ = false;
@@ -120,7 +124,7 @@ void ProxyConnector::Cancel() {
     MaybeRelease();
 }
 
-void ProxyConnector::OnConnect(core::ring::ConnectEvent& ev, std::int32_t result) {
+core::ring::DispatchResult ProxyConnector::OnConnect(core::ring::ConnectEvent& ev, std::int32_t result) {
     --pending_ops_;
     if (&ev == active_connect_ev_) {
         active_connect_ev_ = nullptr;
@@ -129,7 +133,7 @@ void ProxyConnector::OnConnect(core::ring::ConnectEvent& ev, std::int32_t result
 
     if (finished_) {
         MaybeRelease();
-        return;
+        return core::ring::DispatchResult::kComplete;
     }
 
     if (timeout_armed_ && active_timeout_ev_) {
@@ -141,6 +145,8 @@ void ProxyConnector::OnConnect(core::ring::ConnectEvent& ev, std::int32_t result
             if (ring_.PrepCancel(*active_timeout_ev_, cancel_ev)) {
                 ++pending_ops_;
                 ring_.Submit();
+            } else {
+                delete cancel_ev;
             }
         }
         timeout_armed_ = false;
@@ -153,7 +159,7 @@ void ProxyConnector::OnConnect(core::ring::ConnectEvent& ev, std::int32_t result
         bridge_->ClosePair();
         NotifyFinished();
         MaybeRelease();
-        return;
+        return core::ring::DispatchResult::kComplete;
     }
 
     auto upstream = CreatePlainProxySession(
@@ -167,9 +173,10 @@ void ProxyConnector::OnConnect(core::ring::ConnectEvent& ev, std::int32_t result
     finished_ = true;
     NotifyFinished();
     MaybeRelease();
+    return core::ring::DispatchResult::kComplete;
 }
 
-void ProxyConnector::OnTimeout(core::ring::TimeoutEvent& ev, std::int32_t result) {
+core::ring::DispatchResult ProxyConnector::OnTimeout(core::ring::TimeoutEvent& ev, std::int32_t result) {
     --pending_ops_;
     if (&ev == active_timeout_ev_) {
         active_timeout_ev_ = nullptr;
@@ -178,12 +185,12 @@ void ProxyConnector::OnTimeout(core::ring::TimeoutEvent& ev, std::int32_t result
 
     if (finished_) {
         MaybeRelease();
-        return;
+        return core::ring::DispatchResult::kComplete;
     }
 
     if (result == -ECANCELED) {
         MaybeRelease();
-        return;
+        return core::ring::DispatchResult::kComplete;
     }
 
     finished_ = true;
@@ -200,17 +207,21 @@ void ProxyConnector::OnTimeout(core::ring::TimeoutEvent& ev, std::int32_t result
             if (ring_.PrepCancel(*active_connect_ev_, cancel_ev)) {
                 ++pending_ops_;
                 ring_.Submit();
+            } else {
+                delete cancel_ev;
             }
         }
     }
 
     NotifyFinished();
     MaybeRelease();
+    return core::ring::DispatchResult::kComplete;
 }
 
-void ProxyConnector::OnCancel(core::ring::CancelEvent&, std::int32_t) {
+core::ring::DispatchResult ProxyConnector::OnCancel(core::ring::CancelEvent&, std::int32_t) {
     --pending_ops_;
     MaybeRelease();
+    return core::ring::DispatchResult::kComplete;
 }
 
 int ProxyConnector::CreateConnectSocket(const TcpProxyResolvedEndpoint& endpoint) {

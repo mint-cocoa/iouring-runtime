@@ -116,17 +116,18 @@ public:
     }
 
 protected:
-    void OnWrite(iouring_runtime::core::ring::WriteEvent& ev,
-                 std::int32_t result) override {
+    iouring_runtime::core::ring::DispatchResult OnWrite(
+        iouring_runtime::core::ring::WriteEvent& ev,
+        std::int32_t result) override {
         auto it = pending_.find(&ev);
         if (it == pending_.end()) {
-            return;
+            return iouring_runtime::core::ring::DispatchResult::kComplete;
         }
 
         if (upload_.aborted) {
             pending_.erase(it);
             TryFinish();
-            return;
+            return iouring_runtime::core::ring::DispatchResult::kComplete;
         }
 
         auto& op = *it->second;
@@ -135,7 +136,7 @@ protected:
             upload_.error = "async write failed";
             pending_.erase(it);
             TryFinish();
-            return;
+            return iouring_runtime::core::ring::DispatchResult::kComplete;
         }
 
         op.written += static_cast<std::size_t>(result);
@@ -143,15 +144,15 @@ protected:
             if (!SubmitPendingWrite(op)) {
                 pending_.erase(it);
                 TryFinish();
-                return;
+                return iouring_runtime::core::ring::DispatchResult::kComplete;
             }
-            op.RetainAfterDispatch();
-            return;
+            return iouring_runtime::core::ring::DispatchResult::kRearmed;
         }
 
         upload_.written_bytes += op.buffer.size();
         pending_.erase(it);
         TryFinish();
+        return iouring_runtime::core::ring::DispatchResult::kComplete;
     }
 
 private:

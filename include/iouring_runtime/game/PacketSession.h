@@ -4,6 +4,7 @@
 #include <iouring_runtime/core/Session.h>
 #include <iouring_runtime/game/PacketBuilder.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -28,6 +29,10 @@ protected:
 
 private:
     static std::uint16_t ReadLe16(const std::byte* data);
+    bool AppendToRecvBuffer(std::span<const std::byte> data);
+    bool ValidatePacketSize(std::uint16_t packet_size);
+    bool CompleteBufferedPacket(std::span<const std::byte> data,
+                                std::size_t& offset);
 
     core::buffer::RecvBuffer recv_buffer_;
 };

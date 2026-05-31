@@ -32,9 +32,9 @@ public:
     void Cancel();
 
 protected:
-    void OnConnect(core::ring::ConnectEvent&, std::int32_t result) final;
-    void OnTimeout(core::ring::TimeoutEvent&, std::int32_t result) final;
-    void OnCancel(core::ring::CancelEvent&, std::int32_t result) final;
+    core::ring::DispatchResult OnConnect(core::ring::ConnectEvent&, std::int32_t result) final;
+    core::ring::DispatchResult OnTimeout(core::ring::TimeoutEvent&, std::int32_t result) final;
+    core::ring::DispatchResult OnCancel(core::ring::CancelEvent&, std::int32_t result) final;
 
 private:
     static int CreateConnectSocket(const TcpProxyResolvedEndpoint& endpoint);

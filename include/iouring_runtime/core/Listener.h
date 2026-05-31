@@ -40,8 +40,8 @@ public:
     }
 
 protected:
-    void OnAccept(ring::AcceptEvent& ev, std::int32_t result, std::uint32_t flags) override;
-    void OnCancel(ring::CancelEvent& ev, std::int32_t result) override;
+    ring::DispatchResult OnAccept(ring::AcceptEvent& ev, std::int32_t result, std::uint32_t flags) override;
+    ring::DispatchResult OnCancel(ring::CancelEvent& ev, std::int32_t result) override;
 
 private:
     bool RegisterAccept();

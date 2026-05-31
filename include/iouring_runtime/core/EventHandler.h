@@ -9,54 +9,53 @@ class EventHandler : public std::enable_shared_from_this<EventHandler> {
 public:
     virtual ~EventHandler() = default;
 
-    void Dispatch(IoEvent* ev, std::int32_t result, std::uint32_t flags);
+    DispatchResult Dispatch(IoEvent* ev, std::int32_t result, std::uint32_t flags);
 
 protected:
-    virtual void OnAccept(AcceptEvent&, std::int32_t, std::uint32_t) {}
-    virtual void OnRecv(RecvEvent&, std::int32_t, std::uint32_t) {}
-    virtual void OnRead(ReadEvent&, std::int32_t) {}
-    virtual void OnWrite(WriteEvent&, std::int32_t) {}
-    virtual void OnSend(SendEvent&, std::int32_t) {}
-    virtual void OnConnect(ConnectEvent&, std::int32_t) {}
-    virtual void OnDisconnect(DisconnectEvent&, std::int32_t) {}
-    virtual void OnCancel(CancelEvent&, std::int32_t) {}
-    virtual void OnPoll(PollEvent&, std::int32_t) {}
-    virtual void OnTimeout(TimeoutEvent&, std::int32_t) {}
+    virtual DispatchResult OnAccept(AcceptEvent&, std::int32_t, std::uint32_t flags) {
+        return MultishotResult(flags);
+    }
+    virtual DispatchResult OnRecv(RecvEvent&, std::int32_t, std::uint32_t flags) {
+        return MultishotResult(flags);
+    }
+    virtual DispatchResult OnRead(ReadEvent&, std::int32_t) { return DispatchResult::kComplete; }
+    virtual DispatchResult OnWrite(WriteEvent&, std::int32_t) { return DispatchResult::kComplete; }
+    virtual DispatchResult OnSend(SendEvent&, std::int32_t) { return DispatchResult::kComplete; }
+    virtual DispatchResult OnConnect(ConnectEvent&, std::int32_t) { return DispatchResult::kComplete; }
+    virtual DispatchResult OnDisconnect(DisconnectEvent&, std::int32_t) { return DispatchResult::kComplete; }
+    virtual DispatchResult OnCancel(CancelEvent&, std::int32_t) { return DispatchResult::kComplete; }
+    virtual DispatchResult OnPoll(PollEvent&, std::int32_t) { return DispatchResult::kComplete; }
+    virtual DispatchResult OnTimeout(TimeoutEvent&, std::int32_t) { return DispatchResult::kComplete; }
+
+    static DispatchResult MultishotResult(std::uint32_t flags) noexcept {
+        return MultishotDispatchResult(flags);
+    }
 };
 
-inline void EventHandler::Dispatch(IoEvent* ev, std::int32_t result, std::uint32_t flags) {
+inline DispatchResult EventHandler::Dispatch(IoEvent* ev, std::int32_t result, std::uint32_t flags) {
     switch (ev->Type()) {
         case EventType::kAccept:
-            OnAccept(static_cast<AcceptEvent&>(*ev), result, flags);
-            break;
+            return OnAccept(static_cast<AcceptEvent&>(*ev), result, flags);
         case EventType::kRecv:
-            OnRecv(static_cast<RecvEvent&>(*ev), result, flags);
-            break;
+            return OnRecv(static_cast<RecvEvent&>(*ev), result, flags);
         case EventType::kRead:
-            OnRead(static_cast<ReadEvent&>(*ev), result);
-            break;
+            return OnRead(static_cast<ReadEvent&>(*ev), result);
         case EventType::kWrite:
-            OnWrite(static_cast<WriteEvent&>(*ev), result);
-            break;
+            return OnWrite(static_cast<WriteEvent&>(*ev), result);
         case EventType::kSend:
-            OnSend(static_cast<SendEvent&>(*ev), result);
-            break;
+            return OnSend(static_cast<SendEvent&>(*ev), result);
         case EventType::kConnect:
-            OnConnect(static_cast<ConnectEvent&>(*ev), result);
-            break;
+            return OnConnect(static_cast<ConnectEvent&>(*ev), result);
         case EventType::kDisconnect:
-            OnDisconnect(static_cast<DisconnectEvent&>(*ev), result);
-            break;
+            return OnDisconnect(static_cast<DisconnectEvent&>(*ev), result);
         case EventType::kCancel:
-            OnCancel(static_cast<CancelEvent&>(*ev), result);
-            break;
+            return OnCancel(static_cast<CancelEvent&>(*ev), result);
         case EventType::kPoll:
-            OnPoll(static_cast<PollEvent&>(*ev), result);
-            break;
+            return OnPoll(static_cast<PollEvent&>(*ev), result);
         case EventType::kTimeout:
-            OnTimeout(static_cast<TimeoutEvent&>(*ev), result);
-            break;
+            return OnTimeout(static_cast<TimeoutEvent&>(*ev), result);
     }
+    return DispatchResult::kComplete;
 }
 
 using EventHandlerRef = std::shared_ptr<EventHandler>;

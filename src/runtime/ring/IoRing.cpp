@@ -165,13 +165,14 @@ bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
                 }
             } else if (data != 0) {
                 auto* ev = reinterpret_cast<IoEvent*>(data);
+                auto dispatch_result = ev->DefaultDispatchResult(flags);
                 auto owner_ptr = ev->Owner();
                 if (owner_ptr) {
                     // Hold the handler through this callback. Submitted
                     // heap events keep their owner alive until final dispatch.
-                    owner_ptr->Dispatch(ev, result, flags);
+                    dispatch_result = owner_ptr->Dispatch(ev, result, flags);
                 }
-                if (ev->ShouldDeleteAfterDispatch(result, flags)) {
+                if (ev->ShouldDeleteAfterDispatch(dispatch_result)) {
                     delete ev;
                 }
             }
@@ -368,13 +369,12 @@ bool IoRing::PrepCancel(IoEvent& target_ev, CancelEvent* cancel_ev) {
         // Best-effort: if cancel SQE fails, shutdown will still terminate
         // the multishot recv by causing it to return EOF.
         obs::LogWarn(kLogCategory, "IoRing::PrepCancel: SQE ring full (shutdown will handle it)");
-        delete cancel_ev;
         return false;
     }
     // First arg: user_data of the target SQE to cancel.
     // If cancel_ev is null, the cancel CQE itself uses user_data=nullptr
-    // so Dispatch ignores it. Session close paths pass an owned cancel_ev
-    // to account for the cancel CQE explicitly.
+    // so Dispatch ignores it. Callers that pass cancel_ev retain ownership
+    // until the cancel CQE completes.
     io_uring_prep_cancel(sqe, &target_ev, 0);
     io_uring_sqe_set_data(sqe, cancel_ev);
     return true;

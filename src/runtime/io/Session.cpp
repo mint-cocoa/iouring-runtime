@@ -44,11 +44,7 @@ Session::Session(int fd, IoRing& ring, BufferPool& pool,
     : socket_(fd)
     , ring_(ring)
     , pool_(pool)
-    , send_queue_(send_queue_max_pending) {
-    drain_gate_.SetOnDrained([this] {
-        TryRelease();
-    });
-}
+    , send_queue_(send_queue_max_pending) {}
 
 Session::~Session() = default;
 
@@ -70,8 +66,14 @@ bool Session::RunOnOwner(std::move_only_function<void(Session&)> task) noexcept 
     });
 }
 
-ring::DrainGate::Token Session::EnterDrain() {
-    return drain_gate_.Enter();
+void Session::BeginPendingIo() noexcept {
+    ++pending_io_;
+}
+
+void Session::CompletePendingIo() noexcept {
+    if (pending_io_ > 0) {
+        --pending_io_;
+    }
 }
 
 void Session::Start() {
@@ -97,17 +99,16 @@ void Session::DisconnectOnOwner() {
     auto* disconnect_ev = new (std::nothrow) ring::DisconnectEvent();
     if (!disconnect_ev) {
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:OOM_SHUTDOWN] DisconnectEvent allocation failed", Fd());
-        drain_gate_.Close();
         TryRelease();
         return;
     }
     disconnect_ev->SetStrongOwner(self);
     disconnect_ev->SetAutoDelete(true);
-    disconnect_ev->SetDrainToken(EnterDrain());
+    BeginPendingIo();
     if (!ring_.PrepDisconnect(*disconnect_ev, Fd())) {
+        CompletePendingIo();
         delete disconnect_ev;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_SHUTDOWN] PrepDisconnect failed", Fd());
-        drain_gate_.Close();
         TryRelease();
         return;
     }
@@ -119,24 +120,28 @@ void Session::DisconnectOnOwner() {
         if (cancel_ev) {
             cancel_ev->SetStrongOwner(self);
             cancel_ev->SetAutoDelete(true);
-            cancel_ev->SetDrainToken(EnterDrain());
+            BeginPendingIo();
             if (!ring_.PrepCancel(*active_recv_ev_, cancel_ev)) {
+                CompletePendingIo();
                 delete cancel_ev;
             }
         }
     }
 
     MarkDrainingOnOwner();
-    drain_gate_.Close();
+    TryRelease();
     ring_.Submit();
 }
 
 // -- Recv handling (fast/slow path + multishot + ENOBUFS) ----
 
-void Session::OnRecv(ring::RecvEvent&,
-                     std::int32_t res, std::uint32_t flags) {
+ring::DispatchResult Session::OnRecv(ring::RecvEvent&,
+                                     std::int32_t res, std::uint32_t flags) {
     const bool more = (flags & IORING_CQE_F_MORE) != 0;
     const bool has_buffer = (flags & IORING_CQE_F_BUFFER) != 0;
+    const auto dispatch_result = more
+        ? ring::DispatchResult::kPending
+        : ring::DispatchResult::kComplete;
 
     // No F_MORE means the kernel will send no more CQEs for this SQE.
     if (!more) {
@@ -157,11 +162,15 @@ void Session::OnRecv(ring::RecvEvent&,
         buf_ring.Return(buf_id);
     }
 
+    if (!more) {
+        CompletePendingIo();
+    }
+
     // During disconnect, skip normal error handling — just wait for
     // all in-flight ops to settle before releasing manager ownership.
     if (!CanUseOnOwner()) {
         TryRelease();
-        return;
+        return dispatch_result;
     }
 
     // Normal error handling
@@ -170,14 +179,14 @@ void Session::OnRecv(ring::RecvEvent&,
         obs::LogDebug(kLogCategory, "Session[fd={}]: [DISC:{}] peer closed connection",
                       Fd(), detail::DisconnectReasonForResult(res));
         Disconnect();
-        return;
+        return dispatch_result;
     }
 
     if (res == -ENOBUFS) {
         // Buffer pool exhausted — multishot terminated, re-register
         obs::LogWarn(kLogCategory, "Session[fd={}]: [WARN:ENOBUFS] provided buffer pool exhausted, re-registering", Fd());
         RegisterRecv();
-        return;
+        return dispatch_result;
     }
 
     if (res < 0) {
@@ -189,26 +198,34 @@ void Session::OnRecv(ring::RecvEvent&,
                           Fd(), res);
         }
         Disconnect();
-        return;
+        return dispatch_result;
     }
 
     // Multishot ended normally (e.g. internal resource limit) — re-register
-    if (!more)
+    if (!more) {
         RegisterRecv();
+        return dispatch_result;
+    }
+
+    return dispatch_result;
 }
 
-void Session::OnDisconnect(ring::DisconnectEvent&, std::int32_t) {
+ring::DispatchResult Session::OnDisconnect(ring::DisconnectEvent&, std::int32_t) {
+    CompletePendingIo();
     TryRelease();
+    return ring::DispatchResult::kComplete;
 }
 
-void Session::OnCancel(ring::CancelEvent&, std::int32_t) {
+ring::DispatchResult Session::OnCancel(ring::CancelEvent&, std::int32_t) {
+    CompletePendingIo();
     TryRelease();
+    return ring::DispatchResult::kComplete;
 }
 
 // -- Drain release gate ----
 
 void Session::TryRelease() {
-    if (!ClosingStarted() || !drain_gate_.Drained())
+    if (!ClosingStarted() || pending_io_ != 0)
         return;
     if (disconnected_notified_)
         return;
@@ -237,8 +254,9 @@ void Session::RegisterRecv() {
     }
     recv_ev->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
     recv_ev->SetAutoDelete(true);
-    recv_ev->SetDrainToken(EnterDrain());
+    BeginPendingIo();
     if (!ring_.PrepRecvMultishot(*recv_ev, Fd())) {
+        CompletePendingIo();
         delete recv_ev;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_RECV] PrepRecvMultishot failed", Fd());
         Disconnect();

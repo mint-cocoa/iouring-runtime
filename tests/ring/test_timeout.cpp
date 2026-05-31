@@ -20,9 +20,10 @@ public:
     std::int32_t last_result = 0;
 
 protected:
-    void OnTimeout(TimeoutEvent& /*ev*/, std::int32_t result) override {
+    DispatchResult OnTimeout(TimeoutEvent& /*ev*/, std::int32_t result) override {
         fired = true;
         last_result = result;
+        return DispatchResult::kComplete;
     }
 };
 
@@ -49,7 +50,7 @@ public:
     }
 
 protected:
-    void OnTimeout(TimeoutEvent& ev, std::int32_t result) override {
+    DispatchResult OnTimeout(TimeoutEvent& ev, std::int32_t result) override {
         state_->in_callback = true;
         ++state_->timeout_callbacks;
         if (clear_first_timeout_owner_ && state_->timeout_callbacks == 1) {
@@ -59,12 +60,14 @@ protected:
         }
         EXPECT_TRUE(result == -ETIME || result == -ECANCELED);
         state_->in_callback = false;
+        return DispatchResult::kComplete;
     }
 
-    void OnCancel(CancelEvent& /*ev*/, std::int32_t /*result*/) override {
+    DispatchResult OnCancel(CancelEvent& /*ev*/, std::int32_t /*result*/) override {
         state_->in_callback = true;
         ++state_->cancel_callbacks;
         state_->in_callback = false;
+        return DispatchResult::kComplete;
     }
 
 private:

@@ -47,15 +47,16 @@ std::expected<void, io::IoError> Session::SendOnOwner(buffer::SendBufferRef buf)
     return {};
 }
 
-void Session::OnSend(ring::SendEvent& ev, std::int32_t res) {
+ring::DispatchResult Session::OnSend(ring::SendEvent& ev, std::int32_t res) {
     auto& send_op = static_cast<SendOp&>(ev);
     if (&send_op == active_send_ev_) {
         active_send_ev_ = nullptr;
     }
 
     if (!CanUseOnOwner()) {
+        CompletePendingIo();
         TryRelease();
-        return;
+        return ring::DispatchResult::kComplete;
     }
 
     if (res < 0) {
@@ -66,8 +67,9 @@ void Session::OnSend(ring::SendEvent& ev, std::int32_t res) {
             obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SEND_ERR] send error res={}",
                           Fd(), res);
         }
+        CompletePendingIo();
         Disconnect();
-        return;
+        return ring::DispatchResult::kComplete;
     }
 
     std::size_t requested = 0;
@@ -83,21 +85,23 @@ void Session::OnSend(ring::SendEvent& ev, std::int32_t res) {
 
         if (!ring_.PrepSendMsg(send_op, Fd(), &send_op.msg, MSG_NOSIGNAL)) {
             obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_SEND_RESUME] partial send resume failed", Fd());
+            CompletePendingIo();
             Disconnect();
-            return;
+            return ring::DispatchResult::kComplete;
         }
         active_send_ev_ = &send_op;
-        send_op.RetainAfterDispatch();
         ring_.Submit();
-        return;
+        return ring::DispatchResult::kRearmed;
     }
 
     send_queue_.MarkSent();
+    CompletePendingIo();
     std::vector<SendBufferRef> next_bufs;
     if (send_queue_.DrainInto(next_bufs, kMaxSendIovecs) != 0) {
         SendBatch(std::move(next_bufs));
-        return;
+        return ring::DispatchResult::kComplete;
     }
+    return ring::DispatchResult::kComplete;
 }
 
 void Session::RegisterSend() {
@@ -143,8 +147,9 @@ void Session::SendInFlightBatch(SendOp& send_op) {
     send_op.msg.msg_iov = send_op.iovecs.data();
     send_op.msg.msg_iovlen = send_op.iovecs.size();
 
-    send_op.SetDrainToken(EnterDrain());
+    BeginPendingIo();
     if (!ring_.PrepSendMsg(send_op, Fd(), &send_op.msg, MSG_NOSIGNAL)) {
+        CompletePendingIo();
         delete &send_op;
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:SQE_FULL_SEND] PrepSendMsg failed", Fd());
         Disconnect();

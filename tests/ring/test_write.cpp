@@ -19,9 +19,10 @@ public:
     std::int32_t last_result = 0;
 
 protected:
-    void OnWrite(WriteEvent& /*ev*/, std::int32_t result) override {
+    DispatchResult OnWrite(WriteEvent& /*ev*/, std::int32_t result) override {
         fired = true;
         last_result = result;
+        return DispatchResult::kComplete;
     }
 };
 

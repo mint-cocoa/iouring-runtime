@@ -64,14 +64,15 @@ private:
     std::expected<void, io::IoError> SendOnOwner(buffer::SendBufferRef buf);
     void SendBatch(std::vector<SendBufferRef> bufs);
     void SendInFlightBatch(SendOp& send_op);
-    void OnRecv(ring::RecvEvent& ev, std::int32_t result, std::uint32_t flags) override;
-    void OnSend(ring::SendEvent& ev, std::int32_t result) override;
-    void OnDisconnect(ring::DisconnectEvent& ev, std::int32_t result) override;
-    void OnCancel(ring::CancelEvent& ev, std::int32_t result) override;
+    ring::DispatchResult OnRecv(ring::RecvEvent& ev, std::int32_t result, std::uint32_t flags) override;
+    ring::DispatchResult OnSend(ring::SendEvent& ev, std::int32_t result) override;
+    ring::DispatchResult OnDisconnect(ring::DisconnectEvent& ev, std::int32_t result) override;
+    ring::DispatchResult OnCancel(ring::CancelEvent& ev, std::int32_t result) override;
 
     // Release manager ownership when all in-flight I/O has settled.
     void TryRelease();
-    ring::DrainGate::Token EnterDrain();
+    void BeginPendingIo() noexcept;
+    void CompletePendingIo() noexcept;
     bool ClosingStarted() const noexcept;
     bool CanUseOnOwner() const noexcept;
     bool TryBeginDisconnectOnOwner() noexcept;
@@ -84,10 +85,7 @@ private:
     buffer::SendQueue send_queue_;
     std::atomic<SessionState> state_{SessionState::kOpen};
     bool disconnected_notified_ = false;
-
-    // Drain gate for submitted ops that must settle before OnDisconnected()
-    // and connected-session ownership release.
-    ring::DrainGate drain_gate_;
+    int pending_io_ = 0;
 
     // Active io_uring ops whose user_data points at heap operation contexts.
     // The pointed-to objects own a strong Session reference and are deleted

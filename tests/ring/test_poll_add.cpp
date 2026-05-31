@@ -13,9 +13,10 @@ public:
     int32_t last_result = 0;
 
 protected:
-    void OnPoll(PollEvent& ev, int32_t result) override {
+    DispatchResult OnPoll(PollEvent& ev, int32_t result) override {
         poll_fired = true;
         last_result = result;
+        return DispatchResult::kComplete;
     }
 };
 

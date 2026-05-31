@@ -95,6 +95,8 @@ void Listener::Stop() {
             if (ring_.PrepCancel(*active_accept_ev_, cancel_ev)) {
                 accept_cancel_requested_ = true;
                 ring_.Submit();
+            } else {
+                delete cancel_ev;
             }
         }
     }
@@ -121,9 +123,12 @@ bool Listener::RegisterAccept() {
     return true;
 }
 
-void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t flags) {
+ring::DispatchResult Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t flags) {
     ZoneScoped;
     const bool more = (flags & IORING_CQE_F_MORE) != 0;
+    const auto dispatch_result = more
+        ? ring::DispatchResult::kPending
+        : ring::DispatchResult::kComplete;
     if (!more) {
         active_accept_ev_ = nullptr;
         accept_cancel_requested_ = false;
@@ -139,7 +144,7 @@ void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t f
             if (!RegisterAccept())
                 obs::LogError(kLogCategory, "Listener: re-register accept failed (SQE full)");
         }
-        return;
+        return dispatch_result;
     }
 
     OnAccept(result);
@@ -149,9 +154,12 @@ void Listener::OnAccept(ring::AcceptEvent&, std::int32_t result, std::uint32_t f
         if (!RegisterAccept())
             obs::LogError(kLogCategory, "Listener: re-register accept failed (SQE full)");
     }
+    return dispatch_result;
 }
 
-void Listener::OnCancel(ring::CancelEvent&, std::int32_t) {}
+ring::DispatchResult Listener::OnCancel(ring::CancelEvent&, std::int32_t) {
+    return ring::DispatchResult::kComplete;
+}
 
 void Listener::OnAccept(int client_fd) {
     // Backpressure: reject new sessions when at capacity
