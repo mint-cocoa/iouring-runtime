@@ -192,6 +192,13 @@ void Worker::Run() {
         ring_->ProcessPostedTasks();
         ring_->Dispatch(config_.io_timeout);
         ring_->ProcessPostedTasks();
+        const auto now = std::chrono::steady_clock::now();
+        auto sessions = ring_->Sessions().Snapshot();
+        for (auto& session : sessions) {
+            if (session) {
+                session->Tick(now);
+            }
+        }
         if (hooks_.tick) {
             hooks_.tick(*this);
         }

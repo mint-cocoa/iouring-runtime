@@ -5,6 +5,7 @@
 #include <openssl/ssl.h>
 
 #include <array>
+#include <cstring>
 #include <deque>
 #include <utility>
 

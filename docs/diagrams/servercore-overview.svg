@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" role="img" aria-labelledby="title desc">
+  <title id="title">ServerCore architecture overview</title>
+  <desc id="desc">Applications use optional protocol modules such as Web, Proxy, and Game. Those modules build on the protocol-independent Core runtime, which owns Linux TCP and io_uring integration.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .core { fill: #dbeafe; stroke: #2563eb; stroke-width: 2.5; }
+      .module { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .app { fill: #f1f5f9; stroke: #64748b; stroke-width: 2; }
+      .kernel { fill: #e2e8f0; stroke: #334155; stroke-width: 2; }
+      .external { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; stroke-dasharray: 8 6; }
+      .title { fill: #0f172a; font: 700 28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #0f172a; font: 700 20px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .small { fill: #475569; font: 500 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .tiny { fill: #64748b; font: 500 12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .arrow { fill: none; stroke: #334155; stroke-width: 2.5; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="960" height="560"/>
+  <text class="title" x="480" y="54" text-anchor="middle">ServerCore Architecture</text>
+  <text class="small" x="480" y="80" text-anchor="middle">Protocol modules add interpretation; Core owns connection and I/O mechanics.</text>
+
+  <rect class="app" x="220" y="112" width="520" height="72" rx="8"/>
+  <text class="label" x="480" y="145" text-anchor="middle">Applications / Examples</text>
+  <text class="small" x="480" y="166" text-anchor="middle">hello_http, tcp_reverse_proxy, dungeon servers, activity server</text>
+
+  <path class="arrow" d="M 480 184 L 480 220"/>
+
+  <rect class="panel" x="90" y="220" width="780" height="118" rx="8"/>
+  <text class="small" x="480" y="248" text-anchor="middle">Optional protocol modules</text>
+
+  <rect class="module" x="135" y="270" width="150" height="44" rx="8"/>
+  <text class="label" x="210" y="299" text-anchor="middle">Web</text>
+
+  <rect class="module" x="315" y="270" width="150" height="44" rx="8"/>
+  <text class="label" x="390" y="299" text-anchor="middle">Proxy</text>
+
+  <rect class="module" x="495" y="270" width="150" height="44" rx="8"/>
+  <text class="label" x="570" y="299" text-anchor="middle">Game</text>
+
+  <rect class="module" x="675" y="270" width="150" height="44" rx="8"/>
+  <text class="label" x="750" y="299" text-anchor="middle">Media</text>
+
+  <path class="arrow" d="M 480 338 L 480 374"/>
+
+  <rect class="core" x="190" y="374" width="580" height="78" rx="8"/>
+  <text class="label" x="480" y="407" text-anchor="middle">Core Runtime</text>
+  <text class="small" x="480" y="430" text-anchor="middle">accept, recv, send, timeout, cancel, buffers, sessions, cross-thread posts</text>
+
+  <path class="arrow" d="M 480 452 L 480 488"/>
+
+  <rect class="kernel" x="210" y="488" width="540" height="50" rx="8"/>
+  <text class="label" x="480" y="520" text-anchor="middle">Linux TCP + io_uring</text>
+
+  <rect class="external" x="40" y="384" width="122" height="58" rx="8"/>
+  <text class="small" x="101" y="409" text-anchor="middle">spdlog</text>
+  <text class="tiny" x="101" y="428" text-anchor="middle">observability</text>
+  <path class="arrow" d="M 162 413 L 188 413"/>
+
+  <rect class="external" x="798" y="384" width="122" height="58" rx="8"/>
+  <text class="small" x="859" y="409" text-anchor="middle">OpenSSL</text>
+  <text class="tiny" x="859" y="428" text-anchor="middle">proxy TLS</text>
+  <path class="arrow" d="M 798 413 L 772 413"/>
+
+  <rect class="external" x="798" y="230" width="122" height="58" rx="8"/>
+  <text class="small" x="859" y="255" text-anchor="middle">llhttp</text>
+  <text class="tiny" x="859" y="274" text-anchor="middle">web parser</text>
+  <path class="arrow" d="M 798 270 L 648 292"/>
+</svg>

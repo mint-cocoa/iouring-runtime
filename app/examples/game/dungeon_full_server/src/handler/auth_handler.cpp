@@ -15,7 +15,7 @@ void HandleLogin(GameSession& session, const std::byte* data, std::uint32_t len)
     if (!pkt.ParseFromArray(data, static_cast<int>(len))) return;
 
     auto* db = session.GetDbService();
-    // shared_from_this()는 shared_ptr<EventHandler> 반환 — static_pointer_cast 필요
+    // Hold the base session type for callbacks that hop back onto the ring.
     auto sess_shared = std::static_pointer_cast<iouring_runtime::core::io::Session>(session.shared_from_this());
     std::weak_ptr<iouring_runtime::core::io::Session> sess_weak = sess_shared;
     auto* ring = &session.GetRing();

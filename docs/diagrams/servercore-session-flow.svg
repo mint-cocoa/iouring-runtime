@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="620" viewBox="0 0 1080 620" role="img" aria-labelledby="title desc">
+  <title id="title">ServerCore accept, receive, and send flow</title>
+  <desc id="desc">A client connection is accepted by Listener, turned into a Session through SessionFactory, receives bytes through IoRing, passes protocol interpretation to a module, then sends bytes through SendQueue and IoRing.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .lane { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .core { fill: #dbeafe; stroke: #2563eb; stroke-width: 2; }
+      .module { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .peer { fill: #e2e8f0; stroke: #334155; stroke-width: 2; }
+      .title { fill: #0f172a; font: 700 28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #0f172a; font: 700 17px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .small { fill: #475569; font: 500 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .tiny { fill: #64748b; font: 500 12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .arrow { fill: none; stroke: #334155; stroke-width: 2.25; marker-end: url(#arrow); }
+      .return { fill: none; stroke: #64748b; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#softArrow); }
+      .divider { stroke: #cbd5e1; stroke-width: 2; stroke-dasharray: 6 6; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="softArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1080" height="620"/>
+  <text class="title" x="540" y="54" text-anchor="middle">Accept, Receive, Send Flow</text>
+  <text class="small" x="540" y="80" text-anchor="middle">Core moves bytes and owns lifecycle; protocol modules decide what the bytes mean.</text>
+
+  <line class="divider" x1="742" y1="118" x2="742" y2="560"/>
+  <text class="small" x="372" y="126" text-anchor="middle">Core runtime boundary</text>
+  <text class="small" x="906" y="126" text-anchor="middle">Protocol module boundary</text>
+
+  <rect class="peer" x="58" y="168" width="136" height="58" rx="8"/>
+  <text class="label" x="126" y="193" text-anchor="middle">Client</text>
+  <text class="tiny" x="126" y="213" text-anchor="middle">TCP socket</text>
+
+  <rect class="core" x="238" y="168" width="136" height="58" rx="8"/>
+  <text class="label" x="306" y="193" text-anchor="middle">Listener</text>
+  <text class="tiny" x="306" y="213" text-anchor="middle">accept CQE</text>
+
+  <rect class="core" x="418" y="168" width="160" height="58" rx="8"/>
+  <text class="label" x="498" y="193" text-anchor="middle">SessionFactory</text>
+  <text class="tiny" x="498" y="213" text-anchor="middle">create subclass</text>
+
+  <rect class="core" x="622" y="168" width="136" height="58" rx="8"/>
+  <text class="label" x="690" y="193" text-anchor="middle">Session</text>
+  <text class="tiny" x="690" y="213" text-anchor="middle">Start</text>
+
+  <path class="arrow" d="M 194 197 L 236 197"/>
+  <path class="arrow" d="M 374 197 L 416 197"/>
+  <path class="arrow" d="M 578 197 L 620 197"/>
+
+  <rect class="core" x="238" y="292" width="136" height="58" rx="8"/>
+  <text class="label" x="306" y="317" text-anchor="middle">IoRing</text>
+  <text class="tiny" x="306" y="337" text-anchor="middle">recv completion</text>
+
+  <rect class="core" x="462" y="292" width="160" height="58" rx="8"/>
+  <text class="label" x="542" y="317" text-anchor="middle">OnRecv</text>
+  <text class="tiny" x="542" y="337" text-anchor="middle">bytes only</text>
+
+  <rect class="module" x="802" y="292" width="208" height="58" rx="8"/>
+  <text class="label" x="906" y="317" text-anchor="middle">Protocol Handler</text>
+  <text class="tiny" x="906" y="337" text-anchor="middle">HTTP, proxy, packet, room</text>
+
+  <path class="arrow" d="M 690 226 L 690 260 L 306 260 L 306 290"/>
+  <path class="arrow" d="M 374 321 L 460 321"/>
+  <path class="arrow" d="M 622 321 L 800 321"/>
+
+  <rect class="core" x="622" y="430" width="136" height="58" rx="8"/>
+  <text class="label" x="690" y="455" text-anchor="middle">Session::Send</text>
+  <text class="tiny" x="690" y="475" text-anchor="middle">owner thread</text>
+
+  <rect class="core" x="418" y="430" width="136" height="58" rx="8"/>
+  <text class="label" x="486" y="455" text-anchor="middle">SendQueue</text>
+  <text class="tiny" x="486" y="475" text-anchor="middle">batch, retry</text>
+
+  <rect class="core" x="238" y="430" width="136" height="58" rx="8"/>
+  <text class="label" x="306" y="455" text-anchor="middle">IoRing</text>
+  <text class="tiny" x="306" y="475" text-anchor="middle">send completion</text>
+
+  <path class="arrow" d="M 906 350 L 906 459 L 760 459"/>
+  <path class="arrow" d="M 622 459 L 556 459"/>
+  <path class="arrow" d="M 418 459 L 376 459"/>
+  <path class="return" d="M 238 459 L 126 459 L 126 228"/>
+
+  <rect class="core" x="462" y="532" width="160" height="44" rx="8"/>
+  <text class="small" x="542" y="559" text-anchor="middle">Disconnect / Drain</text>
+  <path class="return" d="M 542 532 L 542 490"/>
+</svg>

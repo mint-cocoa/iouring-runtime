@@ -1,5 +1,5 @@
-#include <iouring_runtime/core/EventHandler.h>
 #include <iouring_runtime/core/IoRing.h>
+#include <iouring_runtime/core/RingEvent.h>
 #include <iouring_runtime/observability/Logging.h>
 #include <iouring_runtime/web/WebServer.h>
 
@@ -482,11 +482,12 @@ private:
     mutable std::mutex mu_;
 };
 
-class AsyncUploadState : public iouring_runtime::core::ring::EventHandler {
+class AsyncUploadState
+    : public std::enable_shared_from_this<AsyncUploadState> {
 public:
     using PendingWrite = UploadState::PendingWrite;
 
-    ~AsyncUploadState() override {
+    ~AsyncUploadState() {
         Close();
     }
 
@@ -507,7 +508,9 @@ public:
         op->offset = upload_.submitted_bytes;
         upload_.submitted_bytes += chunk.size();
         auto* event = op.release();
-        event->SetStrongOwner(shared_from_this());
+        auto self = shared_from_this();
+        iouring_runtime::core::ring::BindCompletion(
+            *event, self, &AsyncUploadState::OnWrite);
         event->SetAutoDelete(true);
         pending_.emplace(event, event);
         if (!SubmitPendingWrite(*event)) {
@@ -543,7 +546,7 @@ public:
 protected:
     iouring_runtime::core::ring::DispatchResult OnWrite(
         iouring_runtime::core::ring::WriteEvent& ev,
-        std::int32_t result) override {
+        std::int32_t result) {
         auto it = pending_.find(&ev);
         if (it == pending_.end()) {
             return iouring_runtime::core::ring::DispatchResult::kComplete;
@@ -568,7 +571,7 @@ protected:
                 TryFinish();
                 return iouring_runtime::core::ring::DispatchResult::kComplete;
             }
-            return iouring_runtime::core::ring::DispatchResult::kRearmed;
+            return iouring_runtime::core::ring::DispatchResult::kPending;
         }
         upload_.written_bytes += op.buffer.size();
         pending_.erase(it);

@@ -41,6 +41,7 @@ std::expected<void, io::IoError> Session::SendOnOwner(buffer::SendBufferRef buf)
         Disconnect();
         return std::unexpected(IoError::kSendFailed);
     }
+    UpdateBackpressure(send_queue_.Snapshot());
     if (result.needs_register) {
         RegisterSend();
     }
@@ -91,16 +92,25 @@ ring::DispatchResult Session::OnSend(ring::SendEvent& ev, std::int32_t res) {
         }
         active_send_ev_ = &send_op;
         ring_.Submit();
-        return ring::DispatchResult::kRearmed;
+        return ring::DispatchResult::kPending;
     }
 
     send_queue_.MarkSent();
     CompletePendingIo();
+    UpdateBackpressure(send_queue_.Snapshot());
+    OnSocketDrained();
+    TryDisconnectAfterFlush();
+    if (active_send_ev_ != nullptr) {
+        return ring::DispatchResult::kComplete;
+    }
+
     std::vector<SendBufferRef> next_bufs;
     if (send_queue_.DrainInto(next_bufs, kMaxSendIovecs) != 0) {
+        UpdateBackpressure(send_queue_.Snapshot());
         SendBatch(std::move(next_bufs));
         return ring::DispatchResult::kComplete;
     }
+    TryDisconnectAfterFlush();
     return ring::DispatchResult::kComplete;
 }
 
@@ -111,6 +121,7 @@ void Session::RegisterSend() {
 
     std::vector<SendBufferRef> bufs;
     if (send_queue_.DrainInto(bufs, kMaxSendIovecs) == 0) return;
+    UpdateBackpressure(send_queue_.Snapshot());
 
     SendBatch(std::move(bufs));
 }
@@ -120,13 +131,13 @@ void Session::SendBatch(std::vector<SendBufferRef> bufs) {
 
     if (active_send_ev_ != nullptr) return;
 
-    auto* send_op = new (std::nothrow) SendOp();
+    auto self = std::static_pointer_cast<Session>(shared_from_this());
+    auto* send_op = new (std::nothrow) SendOp(self);
     if (!send_op) {
         obs::LogError(kLogCategory, "Session[fd={}]: [DISC:OOM_SEND] SendOp allocation failed", Fd());
         Disconnect();
         return;
     }
-    send_op->SetStrongOwner(std::static_pointer_cast<Session>(shared_from_this()));
     send_op->SetAutoDelete(true);
     send_op->bufs = std::move(bufs);
     SendInFlightBatch(*send_op);
@@ -157,6 +168,61 @@ void Session::SendInFlightBatch(SendOp& send_op) {
     }
     active_send_ev_ = &send_op;
     ring_.Submit();
+}
+
+bool Session::HighWatermarkReached(
+    const buffer::SendQueue::Stats& stats) const noexcept {
+    return (send_queue_high_watermark_ != 0 &&
+            stats.current_depth >= send_queue_high_watermark_) ||
+           (send_queue_high_bytes_ != 0 &&
+            stats.pending_bytes >= send_queue_high_bytes_);
+}
+
+bool Session::LowWatermarkReached(
+    const buffer::SendQueue::Stats& stats) const noexcept {
+    const bool depth_low =
+        send_queue_high_watermark_ == 0 ||
+        stats.current_depth <= send_queue_low_watermark_;
+    const bool bytes_low =
+        send_queue_high_bytes_ == 0 ||
+        stats.pending_bytes <= send_queue_low_bytes_;
+    return depth_low && bytes_low;
+}
+
+void Session::UpdateBackpressure(const buffer::SendQueue::Stats& stats) {
+    if (!backpressure_active_) {
+        if (!HighWatermarkReached(stats)) {
+            return;
+        }
+
+        backpressure_active_ = true;
+        last_backpressure_high_ = std::chrono::steady_clock::now();
+        OnBackpressure(true);
+        if (pause_recv_on_backpressure_) {
+            recv_paused_ = true;
+        }
+        if (disconnect_on_high_watermark_ &&
+            backpressure_disconnect_delay_.count() == 0) {
+            obs::LogWarn(kLogCategory,
+                         "Session[fd={}]: [DISC:SEND_HIGH_WATERMARK] depth={} bytes={}",
+                         Fd(), stats.current_depth, stats.pending_bytes);
+            Disconnect();
+        }
+        return;
+    }
+
+    if (!LowWatermarkReached(stats)) {
+        return;
+    }
+
+    backpressure_active_ = false;
+    last_backpressure_high_ = {};
+    OnBackpressure(false);
+    if (pause_recv_on_backpressure_) {
+        recv_paused_ = false;
+        DrainPausedRecv();
+        RegisterRecv();
+    }
 }
 
 } // namespace iouring_runtime::core::io

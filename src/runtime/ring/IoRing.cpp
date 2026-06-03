@@ -1,5 +1,4 @@
 #include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/core/EventHandler.h>
 #include <iouring_runtime/observability/Profiler.h>
 
 #include <liburing.h>
@@ -165,13 +164,7 @@ bool IoRing::Dispatch(std::chrono::milliseconds timeout) {
                 }
             } else if (data != 0) {
                 auto* ev = reinterpret_cast<IoEvent*>(data);
-                auto dispatch_result = ev->DefaultDispatchResult(flags);
-                auto owner_ptr = ev->Owner();
-                if (owner_ptr) {
-                    // Hold the handler through this callback. Submitted
-                    // heap events keep their owner alive until final dispatch.
-                    dispatch_result = owner_ptr->Dispatch(ev, result, flags);
-                }
+                const auto dispatch_result = ev->Dispatch(result, flags);
                 if (ev->ShouldDeleteAfterDispatch(dispatch_result)) {
                     delete ev;
                 }

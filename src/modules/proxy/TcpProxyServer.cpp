@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cctype>
 #include <csignal>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <netdb.h>

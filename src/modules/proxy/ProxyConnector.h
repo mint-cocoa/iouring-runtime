@@ -3,7 +3,7 @@
 #include "ProxyCommon.h"
 #include "ProxySessions.h"
 
-#include <iouring_runtime/core/EventHandler.h>
+#include <iouring_runtime/core/RingEvent.h>
 #include <iouring_runtime/core/SocketHandle.h>
 
 #include <expected>
@@ -12,7 +12,7 @@
 
 namespace iouring_runtime::proxy::detail {
 
-class ProxyConnector final : public core::ring::EventHandler {
+class ProxyConnector final : public std::enable_shared_from_this<ProxyConnector> {
 public:
     using FinishedCallback = std::move_only_function<void(ProxyConnector*)>;
     using ConnectResultCallback =
@@ -31,12 +31,10 @@ public:
     std::expected<void, core::io::IoError> Start();
     void Cancel();
 
-protected:
-    core::ring::DispatchResult OnConnect(core::ring::ConnectEvent&, std::int32_t result) final;
-    core::ring::DispatchResult OnTimeout(core::ring::TimeoutEvent&, std::int32_t result) final;
-    core::ring::DispatchResult OnCancel(core::ring::CancelEvent&, std::int32_t result) final;
-
 private:
+    core::ring::DispatchResult OnConnect(core::ring::ConnectEvent&, std::int32_t result);
+    core::ring::DispatchResult OnTimeout(core::ring::TimeoutEvent&, std::int32_t result);
+    core::ring::DispatchResult OnCancel(core::ring::CancelEvent&, std::int32_t result);
     static int CreateConnectSocket(const TcpProxyResolvedEndpoint& endpoint);
     void NotifyConnectResult(bool success, bool timeout);
     void NotifyFinished();

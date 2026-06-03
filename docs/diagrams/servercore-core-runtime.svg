@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="620" viewBox="0 0 1040 620" role="img" aria-labelledby="title desc">
+  <title id="title">ServerCore core runtime model</title>
+  <desc id="desc">A WorkerPool owns worker threads. Each worker owns an IoRing, BufferPool, Listener, SessionManager, sessions, job queue, and timer. Cross-thread work is posted to the owning ring.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .pool { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; }
+      .worker { fill: #eff6ff; stroke: #2563eb; stroke-width: 2.5; }
+      .owned { fill: #ffffff; stroke: #60a5fa; stroke-width: 2; }
+      .session { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .job { fill: #fef9c3; stroke: #ca8a04; stroke-width: 2; }
+      .external { fill: #e2e8f0; stroke: #334155; stroke-width: 2; }
+      .title { fill: #0f172a; font: 700 28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #0f172a; font: 700 18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .small { fill: #475569; font: 500 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .tiny { fill: #64748b; font: 500 12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .arrow { fill: none; stroke: #334155; stroke-width: 2.25; marker-end: url(#arrow); }
+      .softArrow { fill: none; stroke: #64748b; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#softArrow); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="softArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1040" height="620"/>
+  <text class="title" x="520" y="54" text-anchor="middle">Core Runtime Model</text>
+  <text class="small" x="520" y="80" text-anchor="middle">One worker thread owns one ring, one buffer pool, listeners, and accepted sessions.</text>
+
+  <rect class="pool" x="52" y="112" width="936" height="456" rx="10"/>
+  <text class="label" x="520" y="144" text-anchor="middle">WorkerPool</text>
+  <text class="small" x="520" y="166" text-anchor="middle">starts, stops, drains, and coordinates worker threads</text>
+
+  <rect class="worker" x="112" y="198" width="816" height="306" rx="10"/>
+  <text class="label" x="520" y="230" text-anchor="middle">Worker Thread</text>
+  <text class="small" x="520" y="252" text-anchor="middle">owner thread for ring operations and session lifecycle changes</text>
+
+  <rect class="owned" x="152" y="286" width="170" height="74" rx="8"/>
+  <text class="label" x="237" y="316" text-anchor="middle">IoRing</text>
+  <text class="tiny" x="237" y="338" text-anchor="middle">submit / complete CQEs</text>
+
+  <rect class="owned" x="352" y="286" width="170" height="74" rx="8"/>
+  <text class="label" x="437" y="316" text-anchor="middle">Listener</text>
+  <text class="tiny" x="437" y="338" text-anchor="middle">accept TCP sockets</text>
+
+  <rect class="owned" x="552" y="286" width="170" height="74" rx="8"/>
+  <text class="label" x="637" y="316" text-anchor="middle">BufferPool</text>
+  <text class="tiny" x="637" y="338" text-anchor="middle">send buffer ownership</text>
+
+  <rect class="owned" x="752" y="286" width="136" height="74" rx="8"/>
+  <text class="label" x="820" y="316" text-anchor="middle">Manager</text>
+  <text class="tiny" x="820" y="338" text-anchor="middle">session lifetime</text>
+
+  <rect class="session" x="252" y="404" width="170" height="62" rx="8"/>
+  <text class="label" x="337" y="432" text-anchor="middle">Session</text>
+  <text class="tiny" x="337" y="452" text-anchor="middle">recv, send, disconnect</text>
+
+  <rect class="session" x="452" y="404" width="170" height="62" rx="8"/>
+  <text class="label" x="537" y="432" text-anchor="middle">SendQueue</text>
+  <text class="tiny" x="537" y="452" text-anchor="middle">short-write retry</text>
+
+  <rect class="job" x="652" y="404" width="170" height="62" rx="8"/>
+  <text class="label" x="737" y="432" text-anchor="middle">Jobs / Timer</text>
+  <text class="tiny" x="737" y="452" text-anchor="middle">deferred work, timeout</text>
+
+  <rect class="external" x="78" y="402" width="126" height="64" rx="8"/>
+  <text class="label" x="141" y="430" text-anchor="middle">Client</text>
+  <text class="tiny" x="141" y="450" text-anchor="middle">TCP peer</text>
+
+  <rect class="external" x="404" y="530" width="232" height="48" rx="8"/>
+  <text class="small" x="520" y="559" text-anchor="middle">Cross-thread Post / RunOnRing</text>
+
+  <path class="arrow" d="M 204 432 L 250 432"/>
+  <path class="arrow" d="M 437 360 L 364 403"/>
+  <path class="arrow" d="M 337 404 L 250 360"/>
+  <path class="arrow" d="M 422 435 L 450 435"/>
+  <path class="arrow" d="M 622 435 L 650 435"/>
+  <path class="arrow" d="M 637 360 L 557 404"/>
+  <path class="arrow" d="M 820 360 L 760 403"/>
+  <path class="softArrow" d="M 520 530 L 520 506"/>
+</svg>

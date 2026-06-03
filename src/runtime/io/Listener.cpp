@@ -88,8 +88,8 @@ std::expected<void, io::IoError> Listener::Start() {
 
 void Listener::Stop() {
     if (active_accept_ev_ && !accept_cancel_requested_) {
-        auto* cancel_ev = new (std::nothrow) ring::StrongCancelEvent(
-            shared_from_this(), active_accept_ev_);
+        auto self = shared_from_this();
+        auto* cancel_ev = new (std::nothrow) CancelOp(self, active_accept_ev_);
         if (cancel_ev) {
             cancel_ev->SetAutoDelete(true);
             if (ring_.PrepCancel(*active_accept_ev_, cancel_ev)) {
@@ -108,8 +108,8 @@ bool Listener::RegisterAccept() {
         return false;
     }
 
-    auto* accept_ev = new (std::nothrow) ring::StrongAcceptEvent(
-        shared_from_this());
+    auto self = shared_from_this();
+    auto* accept_ev = new (std::nothrow) AcceptOp(self);
     if (!accept_ev) {
         return false;
     }

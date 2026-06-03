@@ -2,7 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <type_traits>
 #include <utility>
 
 #include <linux/time_types.h>  // struct __kernel_timespec (TimeoutEvent)
@@ -10,13 +12,9 @@
 
 namespace iouring_runtime::core::ring {
 
-class EventHandler;
-using EventHandlerRef = std::shared_ptr<EventHandler>;
-
 enum class DispatchResult : std::uint8_t {
     kComplete,
     kPending,
-    kRearmed,
 };
 
 inline DispatchResult MultishotDispatchResult(std::uint32_t flags) noexcept {
@@ -44,10 +42,21 @@ enum class EventType : std::uint8_t {
 // the CQE. Heap-allocated ops hold their owner alive until final CQE.
 class IoEvent {
 public:
+    using CompletionFn =
+        std::move_only_function<DispatchResult(IoEvent&, std::int32_t, std::uint32_t)>;
+
     explicit IoEvent(EventType type) noexcept : type_(type) {}
     virtual ~IoEvent() = default;
 
     EventType Type() const noexcept { return type_; }
+    virtual DispatchResult Dispatch(std::int32_t result, std::uint32_t flags) {
+        auto dispatch_owner = keep_alive_;
+        if (completion_) {
+            return completion_(*this, result, flags);
+        }
+        return DefaultDispatchResult(flags);
+    }
+
     DispatchResult DefaultDispatchResult(std::uint32_t flags) const noexcept {
         switch (type_) {
             case EventType::kAccept:
@@ -58,8 +67,17 @@ public:
         }
     }
 
-    EventHandlerRef Owner() const { return owner_ptr_; }
-    void SetStrongOwner(EventHandlerRef owner_ptr) { owner_ptr_ = std::move(owner_ptr); }
+    void SetCompletion(CompletionFn completion) {
+        completion_ = std::move(completion);
+    }
+
+    void KeepAlive(std::shared_ptr<void> owner) {
+        keep_alive_ = std::move(owner);
+    }
+
+    void ClearKeepAlive() noexcept {
+        keep_alive_.reset();
+    }
 
     bool AutoDelete() const noexcept { return auto_delete_; }
     void SetAutoDelete(bool value) noexcept { auto_delete_ = value; }
@@ -69,20 +87,44 @@ public:
 
 private:
     EventType type_;
-    EventHandlerRef owner_ptr_;
+    CompletionFn completion_;
+    std::shared_ptr<void> keep_alive_;
     bool auto_delete_{false};
 };
 
-// Convenience wrapper for constructing an event with a strong owner.
-template <class EventT>
-class StrongOwnedEvent : public EventT {
-public:
-    template <class... Args>
-    explicit StrongOwnedEvent(EventHandlerRef owner_ptr, Args&&... args)
-        : EventT(std::forward<Args>(args)...) {
-        this->SetStrongOwner(std::move(owner_ptr));
-    }
-};
+template <class EventT, class OwnerT, class HandlerEventT>
+void BindCompletion(
+    EventT& ev,
+    std::shared_ptr<OwnerT> owner,
+    DispatchResult (OwnerT::*handler)(HandlerEventT&, std::int32_t, std::uint32_t)) {
+    static_assert(std::is_base_of_v<HandlerEventT, EventT>,
+                  "handler event type must be a base of the bound event type");
+    auto* raw_owner = owner.get();
+    ev.KeepAlive(std::move(owner));
+    ev.SetCompletion([raw_owner, handler](
+                         IoEvent& ev,
+                         std::int32_t result,
+                         std::uint32_t flags) {
+        return (raw_owner->*handler)(static_cast<HandlerEventT&>(ev), result, flags);
+    });
+}
+
+template <class EventT, class OwnerT, class HandlerEventT>
+void BindCompletion(
+    EventT& ev,
+    std::shared_ptr<OwnerT> owner,
+    DispatchResult (OwnerT::*handler)(HandlerEventT&, std::int32_t)) {
+    static_assert(std::is_base_of_v<HandlerEventT, EventT>,
+                  "handler event type must be a base of the bound event type");
+    auto* raw_owner = owner.get();
+    ev.KeepAlive(std::move(owner));
+    ev.SetCompletion([raw_owner, handler](
+                         IoEvent& ev,
+                         std::int32_t result,
+                         std::uint32_t) {
+        return (raw_owner->*handler)(static_cast<HandlerEventT&>(ev), result);
+    });
+}
 
 // -- Concrete events ----
 
@@ -158,12 +200,5 @@ public:
     TimeoutEvent() : IoEvent(EventType::kTimeout) {}
     struct __kernel_timespec ts{};
 };
-
-using StrongAcceptEvent = StrongOwnedEvent<AcceptEvent>;
-using StrongCancelEvent = StrongOwnedEvent<CancelEvent>;
-using StrongConnectEvent = StrongOwnedEvent<ConnectEvent>;
-using StrongPollEvent = StrongOwnedEvent<PollEvent>;
-using StrongTimeoutEvent = StrongOwnedEvent<TimeoutEvent>;
-using StrongWriteEvent = StrongOwnedEvent<WriteEvent>;
 
 } // namespace iouring_runtime::core::ring

@@ -158,8 +158,8 @@ bool HttpSession::CompleteStreamingRequest(HttpRequest& request) {
         }
     }
 
-    if (!active_stream_.response->IsSent() &&
-        !active_stream_.response->IsDeferred()) {
+    const bool deferred = active_stream_.response->IsDeferred();
+    if (!active_stream_.response->IsSent() && !deferred) {
         active_stream_.response->Send();
     }
 
@@ -177,6 +177,11 @@ bool HttpSession::CompleteStreamingRequest(HttpRequest& request) {
 
     request.ClearParams();
     active_stream_ = {};
+
+    if (deferred) {
+        active_stream_ = {};
+        return false;
+    }
 
     if (!request.keep_alive) {
         DisconnectAfterFlush();

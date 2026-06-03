@@ -1,4 +1,3 @@
-#include <iouring_runtime/core/EventHandler.h>
 #include <iouring_runtime/core/IoRing.h>
 
 #include <gtest/gtest.h>
@@ -6,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <string_view>
 #include <unistd.h>
 
@@ -13,13 +13,12 @@ using namespace iouring_runtime::core::ring;
 
 namespace {
 
-class WriteObserver : public EventHandler {
+class WriteObserver : public std::enable_shared_from_this<WriteObserver> {
 public:
     bool fired = false;
     std::int32_t last_result = 0;
 
-protected:
-    DispatchResult OnWrite(WriteEvent& /*ev*/, std::int32_t result) override {
+    DispatchResult OnWrite(WriteEvent&, std::int32_t result) {
         fired = true;
         last_result = result;
         return DispatchResult::kComplete;
@@ -39,7 +38,8 @@ TEST(IoRingWrite, WritesToPipe) {
 
     constexpr std::string_view payload = "hello through io_uring write";
     auto observer = std::make_shared<WriteObserver>();
-    auto* ev = new StrongWriteEvent(observer);
+    auto* ev = new WriteEvent();
+    BindCompletion(*ev, observer, &WriteObserver::OnWrite);
     ev->SetAutoDelete(true);
 
     ASSERT_TRUE(ring.PrepWrite(*ev, fds[1], payload.data(),

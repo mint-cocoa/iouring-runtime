@@ -1,19 +1,18 @@
 #include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/core/EventHandler.h>
 #include <gtest/gtest.h>
+#include <memory>
 #include <sys/eventfd.h>
 #include <poll.h>
 #include <unistd.h>
 
 using namespace iouring_runtime::core::ring;
 
-class PollObject : public EventHandler {
+class PollObject : public std::enable_shared_from_this<PollObject> {
 public:
     bool poll_fired = false;
     int32_t last_result = 0;
 
-protected:
-    DispatchResult OnPoll(PollEvent& ev, int32_t result) override {
+    DispatchResult OnPoll(PollEvent&, int32_t result) {
         poll_fired = true;
         last_result = result;
         return DispatchResult::kComplete;
@@ -30,7 +29,8 @@ TEST(PollAddTest, EventFdTriggersPollin) {
     ASSERT_GE(efd, 0);
 
     auto obj = std::make_shared<PollObject>();
-    auto* poll_ev = new StrongPollEvent(obj);
+    auto* poll_ev = new PollEvent();
+    BindCompletion(*poll_ev, obj, &PollObject::OnPoll);
     poll_ev->SetAutoDelete(true);
 
     ASSERT_TRUE(ring.PrepPollAdd(*poll_ev, efd, POLLIN));
