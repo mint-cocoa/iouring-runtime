@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - "Dockerfile.k8s-web"
-      - "app/activity-server/**"
       - "app/examples/web/**"
       - "cmake/**"
       - "include/**"
@@ -28,8 +27,6 @@ jobs:
         image:
           - name: web
             file: Dockerfile.k8s-web
-          - name: activity
-            file: app/activity-server/Dockerfile
     steps:
       - name: Checkout runtime
         uses: actions/checkout@v4
