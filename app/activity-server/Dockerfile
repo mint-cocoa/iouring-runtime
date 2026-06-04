@@ -27,15 +27,11 @@ RUN cmake -S . -B build -G Ninja \
         -DBUILD_ACTIVITY_SERVER=ON \
     && cmake --build build --target activity_server
 
-FROM node:20-alpine AS frontend-build
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-build
 WORKDIR /frontend
 
 COPY app/activity-server/frontend/package.json app/activity-server/frontend/package-lock.json ./
-RUN npm ci \
-    && npm install --no-save \
-        @rollup/rollup-linux-arm64-musl \
-        lightningcss-linux-arm64-musl \
-        @tailwindcss/oxide-linux-arm64-musl
+RUN npm ci
 
 COPY app/activity-server/frontend/ ./
 RUN npm run build
