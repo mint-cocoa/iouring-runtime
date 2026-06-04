@@ -22,6 +22,7 @@ RUN cmake -S . -B build -G Ninja \
         -DBUILD_WEB=OFF \
         -DBUILD_PROXY=OFF \
         -DBUILD_GAME=OFF \
+        -DBUILD_MEDIA=ON \
         -DBUILD_EXAMPLES=OFF \
         -DBUILD_ACTIVITY_SERVER=ON \
     && cmake --build build --target activity_server
