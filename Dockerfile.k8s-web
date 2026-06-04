@@ -1,0 +1,51 @@
+FROM ubuntu:24.04 AS build
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        git \
+        ninja-build \
+        pkg-config \
+        liburing-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+RUN cmake -S . -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_WEB=ON \
+        -DBUILD_EXAMPLES=ON \
+        -DBUILD_ACTIVITY_SERVER=OFF \
+        -DBUILD_TESTS=OFF \
+    && cmake --build build --target hello_http status_server speedtest_server
+
+FROM ubuntu:24.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates liburing2 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --system --uid 10003 --home-dir /nonexistent --shell /usr/sbin/nologin iouring \
+    && mkdir -p /usr/share/iouring-runtime/openspeedtest \
+    && chown -R iouring:iouring /usr/share/iouring-runtime
+
+COPY --from=build /src/build/bin/hello_http /usr/local/bin/hello_http
+COPY --from=build /src/build/bin/status_server /usr/local/bin/status_server
+COPY --from=build /src/build/bin/speedtest_server /usr/local/bin/speedtest_server
+COPY --from=build /src/app/examples/web/speedtest_server/public /usr/share/iouring-runtime/openspeedtest
+
+USER iouring
+ENV HELLO_HTTP_HOST=0.0.0.0 \
+    HELLO_HTTP_PORT=8080 \
+    STATUS_HOST=0.0.0.0 \
+    STATUS_PORT=3010 \
+    SPEEDTEST_HOST=0.0.0.0 \
+    SPEEDTEST_PORT=3011 \
+    SPEEDTEST_STATIC_ROOT=/usr/share/iouring-runtime/openspeedtest
+EXPOSE 8080 3010 3011
+ENTRYPOINT ["/usr/local/bin/hello_http"]
