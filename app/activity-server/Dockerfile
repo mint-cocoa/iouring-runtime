@@ -32,7 +32,9 @@ WORKDIR /frontend
 
 COPY app/activity-server/frontend/package.json app/activity-server/frontend/package-lock.json ./
 RUN npm ci \
-    && npm install --no-save @rollup/rollup-linux-arm64-musl
+    && npm install --no-save \
+        @rollup/rollup-linux-arm64-musl \
+        lightningcss-linux-arm64-musl
 
 COPY app/activity-server/frontend/ ./
 RUN npm run build
