@@ -35,6 +35,7 @@ option(BUILD_WEB "Build the optional HTTP web module" OFF)
 option(BUILD_PROXY "Build the optional TCP proxy module" OFF)
 option(BUILD_GAME "Build the optional multiplayer game packet module" OFF)
 option(BUILD_MEDIA "Build the optional media helpers module" OFF)
+option(BUILD_BENCHMARKS "Build benchmark-only servers and clients" OFF)
 
 if(BUILD_WEB)
     FetchContent_Declare(
@@ -295,6 +296,10 @@ if(BUILD_EXAMPLES)
             add_subdirectory(${_dir})
         endif()
     endforeach()
+endif()
+
+if(BUILD_BENCHMARKS)
+    add_subdirectory(app/benchmarks)
 endif()
 
 option(BUILD_ACTIVITY_SERVER "Build the C++ Activity backend server" OFF)
