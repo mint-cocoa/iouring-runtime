@@ -16,6 +16,20 @@ bare-metal Linux machine, see:
 
 ## Quick Start
 
+Run the integrated runtime suite when you want Core echo, Web, Proxy, Game
+fan-out, and benchmark-only `epoll` references in one result directory:
+
+```bash
+SUITE_MODE=quick ./scripts/run_runtime_bench_suite.sh
+```
+
+Standard mode repeats benchmark scenarios three times and writes median-ready
+artifacts under `benchmark-results/runtime-suite/<timestamp>/`:
+
+```bash
+./scripts/run_runtime_bench_suite.sh
+```
+
 Run the default medium preset against `app/examples/web/hello_http`:
 
 ```bash

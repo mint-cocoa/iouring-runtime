@@ -13,24 +13,37 @@
 #include <signal.h>
 #include <atomic>
 #include <cstdlib>
+#include <cstdint>
 #include <string>
 #include <thread>
 
 static std::atomic<bool> g_running{true};
 void SignalHandler(int) { g_running = false; }
 
+namespace {
+
+std::uint16_t ReadU16Env(const char* name, std::uint16_t fallback) {
+    if (const char* raw = std::getenv(name)) {
+        return static_cast<std::uint16_t>(std::stoi(raw));
+    }
+    return fallback;
+}
+
+} // namespace
+
 int main() {
     signal(SIGINT, SignalHandler);
     signal(SIGTERM, SignalHandler);
 
-    constexpr std::uint16_t kPort = 7777;
-    constexpr std::uint16_t kWorkerCount = 2;
+    const std::uint16_t port = ReadU16Env("DUNGEON_SERVER_PORT", 7777);
+    const std::uint16_t worker_count =
+        ReadU16Env("DUNGEON_SERVER_WORKERS", 2);
 
-    spdlog::info("GameServer starting on port {}...", kPort);
+    spdlog::info("GameServer starting on port {}...", port);
 
     // 글로벌 서비스
     PlayerManager player_manager;
-    IoWorkerPool worker_pool(kWorkerCount);
+    IoWorkerPool worker_pool(worker_count);
     RoomManager room_manager(worker_pool.GetGlobalQueue(), &worker_pool,
                              worker_pool.GetTimer());
 
@@ -50,9 +63,9 @@ int main() {
     static std::atomic<iouring_runtime::core::SessionId> g_next_sid{1};
 
     // 각 IoWorker 개별 시작
-    iouring_runtime::core::Address addr{"0.0.0.0", kPort};
+    iouring_runtime::core::Address addr{"0.0.0.0", port};
 
-    for (std::uint16_t i = 0; i < kWorkerCount; ++i) {
+    for (std::uint16_t i = 0; i < worker_count; ++i) {
         auto* worker = worker_pool.GetWorker(i);
 
         iouring_runtime::core::io::SessionFactory factory =
@@ -75,7 +88,7 @@ int main() {
         worker->Start(addr, std::move(factory));
     }
 
-    spdlog::info("GameServer ready - {} workers, port {}", kWorkerCount, kPort);
+    spdlog::info("GameServer ready - {} workers, port {}", worker_count, port);
 
     // 메인 스레드: 시그널 대기 + 주기적 빈 Room 정리
     int cleanup_counter = 0;
