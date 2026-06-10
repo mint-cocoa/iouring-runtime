@@ -75,15 +75,17 @@ std::expected<std::unique_ptr<IoRing>, RingError> IoRing::Create(const IoRingCon
         io_uring_register_ring_fd(raw);
 
     auto br_result = RingBuffer::Create(raw, cfg.buf_ring);
-    if (!br_result) {
-        io_uring_queue_exit(raw);
-        delete raw;
-        return std::unexpected(RingError::kBufferRegistrationFailed);
+    std::unique_ptr<RingBuffer> buf_ring;
+    if (br_result) {
+        buf_ring = std::move(*br_result);
+    } else {
+        obs::LogWarn(kLogCategory,
+                     "IoRing::Create: provided buffer ring unavailable; using compatibility recv path");
     }
 
     return std::unique_ptr<IoRing>(new IoRing(
         raw,
-        std::move(*br_result),
+        std::move(buf_ring),
         std::max<std::uint32_t>(1, cfg.submit_batch_size),
         cfg.cqe_batch_budget));
 }
@@ -258,14 +260,22 @@ bool IoRing::PrepRecv(RecvEvent& ev, int fd) {
         obs::LogError(kLogCategory, "IoRing::PrepRecv: SQE ring full");
         return false;
     }
-    io_uring_prep_recv(sqe, fd, nullptr, 0, 0);
-    sqe->flags |= IOSQE_BUFFER_SELECT;
-    sqe->buf_group = buf_ring_->GroupId();
+    if (buf_ring_) {
+        io_uring_prep_recv(sqe, fd, nullptr, 0, 0);
+        sqe->flags |= IOSQE_BUFFER_SELECT;
+        sqe->buf_group = buf_ring_->GroupId();
+    } else {
+        ev.EnsureBuffer(8192);
+        io_uring_prep_recv(sqe, fd, ev.MutableBufferData(), ev.BufferCapacity(), 0);
+    }
     io_uring_sqe_set_data(sqe, &ev);
     return true;
 }
 
 bool IoRing::PrepRecvMultishot(RecvEvent& ev, int fd) {
+    if (!buf_ring_) {
+        return PrepRecv(ev, fd);
+    }
     io_uring_sqe* sqe = GetSqe();
     if (!sqe) {
         obs::LogError(kLogCategory, "IoRing::PrepRecvMultishot: SQE ring full");
@@ -325,7 +335,11 @@ bool IoRing::PrepAcceptMultishot(AcceptEvent& ev, int listen_fd) {
         obs::LogError(kLogCategory, "IoRing::PrepAcceptMultishot: SQE ring full");
         return false;
     }
-    io_uring_prep_multishot_accept(sqe, listen_fd, nullptr, nullptr, 0);
+    if (buf_ring_) {
+        io_uring_prep_multishot_accept(sqe, listen_fd, nullptr, nullptr, 0);
+    } else {
+        io_uring_prep_accept(sqe, listen_fd, nullptr, nullptr, 0);
+    }
     io_uring_sqe_set_data(sqe, &ev);
     return true;
 }

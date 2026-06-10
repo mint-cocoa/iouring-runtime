@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <linux/time_types.h>  // struct __kernel_timespec (TimeoutEvent)
 #include <liburing.h>
@@ -139,9 +141,20 @@ public:
 
     std::uint16_t BufferId() const noexcept { return buffer_id_; }
     void SetBufferId(std::uint16_t id) noexcept { buffer_id_ = id; }
+    void EnsureBuffer(std::size_t size) {
+        if (buffer_.size() < size) {
+            buffer_.resize(size);
+        }
+    }
+    std::byte* MutableBufferData() noexcept { return buffer_.data(); }
+    std::size_t BufferCapacity() const noexcept { return buffer_.size(); }
+    std::span<const std::byte> BufferView(std::size_t len) const noexcept {
+        return {buffer_.data(), len < buffer_.size() ? len : buffer_.size()};
+    }
 
 private:
     std::uint16_t buffer_id_{0};
+    std::vector<std::byte> buffer_;
 };
 
 class ReadEvent : public IoEvent {

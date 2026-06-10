@@ -53,8 +53,11 @@ std::expected<std::unique_ptr<RingBuffer>, RingError> RingBuffer::Create(io_urin
     reg.ring_entries = cfg.buf_count;
     reg.bgid = cfg.group_id;
 
-    if (io_uring_register_buf_ring(ring, &reg, 0) < 0)
+    int ret = io_uring_register_buf_ring(ring, &reg, 0);
+    if (ret < 0) {
+        obs::LogWarn(kLogCategory, "RingBuffer::Create: register buffer ring failed: {}", ret);
         return std::unexpected(RingError::kBufferRegistrationFailed);
+    }
 
     // Initialize all buffers into the ring
     const unsigned shift = log2u(cfg.buf_size);

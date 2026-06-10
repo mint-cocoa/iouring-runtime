@@ -163,7 +163,7 @@ void Session::DisconnectOnOwner() {
 
 // -- Recv handling (fast/slow path + multishot + ENOBUFS) ----
 
-ring::DispatchResult Session::OnRecv(ring::RecvEvent&,
+ring::DispatchResult Session::OnRecv(ring::RecvEvent& ev,
                                      std::int32_t res, std::uint32_t flags) {
     const bool more = (flags & IORING_CQE_F_MORE) != 0;
     const bool has_buffer = (flags & IORING_CQE_F_BUFFER) != 0;
@@ -195,6 +195,16 @@ ring::DispatchResult Session::OnRecv(ring::RecvEvent&,
         }
 
         buf_ring.Return(buf_id);
+    } else if (res > 0 && CanUseOnOwner()) {
+        auto view = ev.BufferView(static_cast<std::uint32_t>(res));
+        TouchActivity();
+        if (recv_paused_) {
+            if (!QueuePausedRecv(view)) {
+                Disconnect();
+            }
+        } else {
+            OnRecv(view);
+        }
     }
 
     if (!more) {

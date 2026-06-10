@@ -83,6 +83,7 @@ public:
     // ── Accessors ────────────────────────────────────────────
     io_uring* Raw() const noexcept { return ring_; }
     int Fd() const noexcept;
+    bool SupportsProvidedBuffers() const noexcept { return static_cast<bool>(buf_ring_); }
     RingBuffer& BufRing() noexcept { return *buf_ring_; }
     io::SessionManager& Sessions() noexcept { return session_manager_; }
     const io::SessionManager& Sessions() const noexcept { return session_manager_; }
