@@ -17,6 +17,12 @@ jobs:
       - name: Checkout runtime
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -28,60 +34,38 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/arm64
           push: true
-          tags: ghcr.io/mint-cocoa/dropapp:${{ github.sha }}
+          tags: |
+            ghcr.io/mint-cocoa/dropapp:main
+            ghcr.io/mint-cocoa/dropapp:${{ github.sha }}
 
       - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
-          repository: mint-cocoa/home-k8s-gitops
-          token: ${{ secrets.HOME_K8S_GITOPS_TOKEN }}
+          repository: mint-cocoa/mintcocoa-ops
+          token: ${{ secrets.MINTCOCOA_OPS_TOKEN }}
           path: gitops
 
       - name: Update dropapp image tag
         working-directory: gitops
         run: |
-          path="apps/dropapp/values.yaml"
+          path="apps/dropapp/overlays/home/kustomization.yaml"
           if [ ! -f "$path" ]; then
-            echo "GITOPS_VALUES_PATH=" >> "$GITHUB_ENV"
+            echo "GITOPS_IMAGE_PATH=" >> "$GITHUB_ENV"
             echo "::notice::Skipping GitOps update because $path does not exist"
             exit 0
           fi
-          export GITOPS_VALUES_PATH="$path"
-          echo "GITOPS_VALUES_PATH=$path" >> "$GITHUB_ENV"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-
-          path = Path(os.environ["GITOPS_VALUES_PATH"])
-          text = path.read_text()
-          lines = []
-          in_image = False
-          changed = False
-          for line in text.splitlines():
-              stripped = line.strip()
-              if not line.startswith(" ") and stripped == "image:":
-                  in_image = True
-                  lines.append(line)
-                  continue
-              if in_image and not line.startswith(" "):
-                  in_image = False
-              if in_image and stripped.startswith("tag:"):
-                  indent = line[: len(line) - len(line.lstrip())]
-                  line = f'{indent}tag: "{os.environ["GITHUB_SHA"]}"'
-                  changed = True
-              lines.append(line)
-          if not changed:
-              raise SystemExit("apps/dropapp/values.yaml image.tag not found")
-          path.write_text("\n".join(lines) + "\n")
-          PY
+          echo "GITOPS_IMAGE_PATH=$path" >> "$GITHUB_ENV"
+          sed -i 's|newName: .*|newName: ghcr.io/mint-cocoa/dropapp|' "$path"
+          sed -i "s|newTag: .*|newTag: ${GITHUB_SHA}|" "$path"
 
       - name: Commit GitOps update
-        if: env.GITOPS_VALUES_PATH != ''
+        if: env.GITOPS_IMAGE_PATH != ''
         working-directory: gitops
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$GITOPS_VALUES_PATH"
+          git add "$GITOPS_IMAGE_PATH"
           git commit -m "deploy dropapp ${GITHUB_SHA}" || exit 0
           git push
