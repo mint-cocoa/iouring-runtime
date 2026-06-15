@@ -34,7 +34,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/arm64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/mint-cocoa/dropapp:main
@@ -50,7 +50,7 @@ jobs:
       - name: Update dropapp image tag
         working-directory: gitops
         run: |
-          path="apps/dropapp/overlays/home/kustomization.yaml"
+          path="apps/dropapp/overlays/staging/kustomization.yaml"
           if [ ! -f "$path" ]; then
             echo "GITOPS_IMAGE_PATH=" >> "$GITHUB_ENV"
             echo "::notice::Skipping GitOps update because $path does not exist"
