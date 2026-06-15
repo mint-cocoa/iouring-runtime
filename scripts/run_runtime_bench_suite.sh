@@ -16,12 +16,14 @@ if [[ "$SUITE_MODE" == "quick" ]]; then
     GAME_DURATION="${GAME_DURATION:-3}"
     ECHO_CLIENTS=(${ECHO_CLIENTS:-10 50})
     GAME_SCENARIOS=(${GAME_SCENARIOS:-"40:1" "80:4"})
+    SERVER_THREADS=(${SERVER_THREADS:-1 4})
 else
     REPEATS="${REPEATS:-3}"
     ECHO_DURATION="${ECHO_DURATION:-10}"
     GAME_DURATION="${GAME_DURATION:-10}"
     ECHO_CLIENTS=(${ECHO_CLIENTS:-10 50 100 200})
     GAME_SCENARIOS=(${GAME_SCENARIOS:-"40:1" "200:1" "400:1" "200:10" "400:20"})
+    SERVER_THREADS=(${SERVER_THREADS:-1 4 8})
 fi
 
 cleanup() {
@@ -83,10 +85,11 @@ start_server() {
 run_echo_group() {
     local server_name="$1"
     local port="$2"
+    local threads="$3"
     for clients in "${ECHO_CLIENTS[@]}"; do
         for repeat in $(seq 1 "$REPEATS"); do
-            local out="${RESULTS_DIR}/${server_name}_echo_c${clients}_r${repeat}.json"
-            echo "[runtime-suite] echo ${server_name} clients=${clients} repeat=${repeat}"
+            local out="${RESULTS_DIR}/${server_name}_echo_t${threads}_c${clients}_r${repeat}.json"
+            echo "[runtime-suite] echo ${server_name} threads=${threads} clients=${clients} repeat=${repeat}"
             "$BUILD_DIR/bin/runtime_echo_bench" \
                 --host "$HOST" \
                 --port "$port" \
@@ -101,11 +104,12 @@ run_echo_group() {
 run_game_group() {
     local server_name="$1"
     local port="$2"
+    local threads="$3"
     for scenario in "${GAME_SCENARIOS[@]}"; do
         IFS=':' read -r bots rooms <<<"$scenario"
         for repeat in $(seq 1 "$REPEATS"); do
-            local out="${RESULTS_DIR}/${server_name}_game_b${bots}_rooms${rooms}_r${repeat}.json"
-            echo "[runtime-suite] game ${server_name} bots=${bots} rooms=${rooms} repeat=${repeat}"
+            local out="${RESULTS_DIR}/${server_name}_game_t${threads}_b${bots}_rooms${rooms}_r${repeat}.json"
+            echo "[runtime-suite] game ${server_name} threads=${threads} bots=${bots} rooms=${rooms} repeat=${repeat}"
             "$BUILD_DIR/bin/runtime_game_fanout_bench" \
                 --host "$HOST" \
                 --port "$port" \
@@ -166,20 +170,35 @@ ctest --test-dir "$BUILD_DIR" --output-on-failure | tee "${RESULTS_DIR}/ctest.tx
     lscpu 2>/dev/null || true
 } >"${RESULTS_DIR}/environment.txt"
 
-start_server "core_echo" 29090 env CORE_ECHO_PORT=29090 "$BUILD_DIR/bin/core_echo"
-run_echo_group "iouring" 29090
+for threads in "${SERVER_THREADS[@]}"; do
+    start_server "core_echo_t${threads}" 29090 env \
+        CORE_ECHO_PORT=29090 \
+        CORE_ECHO_WORKERS="$threads" \
+        "$BUILD_DIR/bin/core_echo"
+    run_echo_group "iouring" 29090 "$threads"
 
-start_server "epoll_echo_server" 29091 env EPOLL_ECHO_PORT=29091 "$BUILD_DIR/bin/epoll_echo_server"
-run_echo_group "epoll" 29091
+    start_server "epoll_echo_server_t${threads}" 29091 env \
+        EPOLL_ECHO_PORT=29091 \
+        EPOLL_ECHO_WORKERS="$threads" \
+        "$BUILD_DIR/bin/epoll_echo_server"
+    run_echo_group "epoll" 29091 "$threads"
 
-start_server "iouring_game_fanout_server" 29120 env IOURING_FANOUT_PORT=29120 "$BUILD_DIR/bin/iouring_game_fanout_server"
-run_game_group "iouring" 29120
+    start_server "iouring_game_fanout_server_t${threads}" 29120 env \
+        IOURING_FANOUT_PORT=29120 \
+        IOURING_FANOUT_WORKERS="$threads" \
+        "$BUILD_DIR/bin/iouring_game_fanout_server"
+    run_game_group "iouring" 29120 "$threads"
 
-start_server "epoll_game_fanout_server" 29121 env EPOLL_FANOUT_PORT=29121 "$BUILD_DIR/bin/epoll_game_fanout_server"
-run_game_group "epoll" 29121
+    start_server "epoll_game_fanout_server_t${threads}" 29121 env \
+        EPOLL_FANOUT_PORT=29121 \
+        EPOLL_FANOUT_WORKERS="$threads" \
+        "$BUILD_DIR/bin/epoll_game_fanout_server"
+    run_game_group "epoll" 29121 "$threads"
+done
 
 start_server "hello_http" 28080 env \
     HELLO_HTTP_PORT=28080 \
+    HELLO_HTTP_WORKERS="${WEB_THREADS:-${SERVER_THREADS[0]}}" \
     HELLO_HTTP_LOG_LEVEL=off \
     HELLO_HTTP_STATIC_ROOT="$ROOT_DIR/scripts/wrk/reference_servers/www" \
     "$BUILD_DIR/bin/hello_http"
@@ -192,6 +211,7 @@ run_wrk_probe "web_epoll_health" "http://${HOST}:28081/health"
 
 start_server "hello_http_upstream" 28083 env \
     HELLO_HTTP_PORT=28083 \
+    HELLO_HTTP_WORKERS="${WEB_THREADS:-${SERVER_THREADS[0]}}" \
     HELLO_HTTP_LOG_LEVEL=off \
     HELLO_HTTP_STATIC_ROOT="$ROOT_DIR/scripts/wrk/reference_servers/www" \
     "$BUILD_DIR/bin/hello_http"
@@ -202,6 +222,7 @@ start_server "tcp_reverse_proxy" 28084 env \
     TCP_PROXY_LISTEN_PORT=28084 \
     TCP_PROXY_UPSTREAM_HOST=127.0.0.1 \
     TCP_PROXY_UPSTREAM_PORT=28083 \
+    TCP_PROXY_WORKERS="${PROXY_THREADS:-${SERVER_THREADS[0]}}" \
     TCP_PROXY_LOG_LEVEL=off \
     "$BUILD_DIR/bin/tcp_reverse_proxy"
 PROXY_PID="$SERVER_PID"
@@ -244,14 +265,19 @@ for path in sorted(out.glob("*.json")):
     stem = path.stem
     parts = stem.split("_")
     server = parts[0]
+    server_threads = "1"
+    for part in parts:
+        if part.startswith("t") and part[1:].isdigit():
+            server_threads = part[1:]
+            break
     bench_type = data.get("type", "")
     scenario = ""
     if bench_type == "echo":
-        scenario = f"clients={data['clients']},payload={data['payload_bytes']}"
+        scenario = f"threads={server_threads},clients={data['clients']},payload={data['payload_bytes']}"
         throughput = data["throughput_per_sec"]
         messages = data["completed"]
     else:
-        scenario = f"bots={data['bots']},rooms={data['rooms']},move_hz={data['move_hz']}"
+        scenario = f"threads={server_threads},bots={data['bots']},rooms={data['rooms']},move_hz={data['move_hz']}"
         throughput = data["messages_per_sec"]
         messages = data["received_messages"]
     rows.append({

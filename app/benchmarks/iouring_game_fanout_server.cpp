@@ -2,7 +2,7 @@
 
 #include <iouring_runtime/core/SendBuffer.h>
 #include <iouring_runtime/core/Session.h>
-#include <iouring_runtime/core/Worker.h>
+#include <iouring_runtime/core/WorkerPool.h>
 
 #include <algorithm>
 #include <atomic>
@@ -150,34 +150,39 @@ int main() {
     std::signal(SIGTERM, OnSignal);
 
     const auto port = bench::ReadPortEnv("IOURING_FANOUT_PORT", 19120);
+    const auto worker_count = static_cast<std::uint16_t>(
+        std::max(1, bench::ReadIntEnv("IOURING_FANOUT_WORKERS", 1)));
     auto hub = std::make_shared<Hub>();
 
-    iouring_runtime::core::io::SessionFactory factory =
-        [hub](int fd, iouring_runtime::core::ring::IoRing& ring,
-              iouring_runtime::core::buffer::BufferPool& pool,
-              iouring_runtime::core::ContextId)
-        -> iouring_runtime::core::io::SessionRef {
-        return std::make_shared<FanoutSession>(fd, ring, pool, hub);
+    iouring_runtime::core::io::WorkerSessionFactoryBuilder factory_builder =
+        [hub](iouring_runtime::core::ContextId) {
+        return [hub](int fd, iouring_runtime::core::ring::IoRing& ring,
+                     iouring_runtime::core::buffer::BufferPool& pool,
+                     iouring_runtime::core::ContextId)
+                   -> iouring_runtime::core::io::SessionRef {
+            return std::make_shared<FanoutSession>(fd, ring, pool, hub);
+        };
     };
 
-    iouring_runtime::core::io::WorkerConfig config;
+    iouring_runtime::core::io::WorkerPoolConfig config;
     config.address = iouring_runtime::core::Address{"0.0.0.0", port};
+    config.worker_count = worker_count;
     config.ring.queue_depth = 4096;
     config.ring.buf_ring.buf_count = 8192;
     config.ring.buf_ring.buf_size = 4096;
     config.io_timeout = std::chrono::milliseconds{1};
 
-    iouring_runtime::core::io::Worker worker(config, std::move(factory));
-    if (!worker.Start()) {
+    iouring_runtime::core::io::WorkerPool workers(config, std::move(factory_builder));
+    if (!workers.Start()) {
         std::cerr << "failed to listen on 0.0.0.0:" << port << "\n";
         return 1;
     }
 
     std::cout << "iouring_game_fanout_server listening on 0.0.0.0:" << port
-              << "\n";
+              << " workers=" << workers.Count() << "\n";
     while (!g_stop.load(std::memory_order_relaxed)) {
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
     }
-    worker.Stop();
+    workers.Stop();
     return 0;
 }

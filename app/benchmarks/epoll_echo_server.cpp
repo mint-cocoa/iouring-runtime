@@ -4,8 +4,10 @@
 #include <unistd.h>
 
 #include <array>
+#include <algorithm>
 #include <csignal>
 #include <iostream>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -28,25 +30,18 @@ void CloseClient(int epoll_fd, std::unordered_map<int, Client>& clients,
     ::close(fd);
 }
 
-} // namespace
-
-int main() {
-    std::signal(SIGINT, OnSignal);
-    std::signal(SIGTERM, OnSignal);
-
-    const auto host = bench::ReadStringEnv("EPOLL_ECHO_HOST", "0.0.0.0");
-    const auto port = bench::ReadPortEnv("EPOLL_ECHO_PORT", 19091);
-
+bool RunWorker(std::string host, std::uint16_t port) {
     const int listen_fd = bench::CreateListenSocket(host, port);
     if (listen_fd < 0) {
         std::cerr << "failed to listen on " << host << ":" << port << "\n";
-        return 1;
+        return false;
     }
 
     const int epoll_fd = ::epoll_create1(EPOLL_CLOEXEC);
     if (epoll_fd < 0) {
         std::cerr << "epoll_create1 failed\n";
-        return 1;
+        ::close(listen_fd);
+        return false;
     }
 
     epoll_event event{};
@@ -57,9 +52,6 @@ int main() {
     std::unordered_map<int, Client> clients;
     std::array<epoll_event, 256> events{};
     std::array<char, 8192> buffer{};
-
-    std::cout << "epoll_echo_server listening on " << host << ":" << port
-              << "\n";
 
     while (!g_stop) {
         const int n = ::epoll_wait(epoll_fd, events.data(), events.size(), 100);
@@ -141,5 +133,34 @@ int main() {
     }
     ::close(epoll_fd);
     ::close(listen_fd);
+    return true;
+}
+
+} // namespace
+
+int main() {
+    std::signal(SIGINT, OnSignal);
+    std::signal(SIGTERM, OnSignal);
+
+    const auto host = bench::ReadStringEnv("EPOLL_ECHO_HOST", "0.0.0.0");
+    const auto port = bench::ReadPortEnv("EPOLL_ECHO_PORT", 19091);
+    const auto worker_count = std::max(1, bench::ReadIntEnv("EPOLL_ECHO_WORKERS", 1));
+
+    std::cout << "epoll_echo_server listening on " << host << ":" << port
+              << " workers=" << worker_count << "\n";
+
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<std::size_t>(worker_count));
+    for (int i = 0; i < worker_count; ++i) {
+        workers.emplace_back([host, port] {
+            if (!RunWorker(host, port)) {
+                g_stop = 1;
+            }
+        });
+    }
+
+    for (auto& worker : workers) {
+        worker.join();
+    }
     return 0;
 }
