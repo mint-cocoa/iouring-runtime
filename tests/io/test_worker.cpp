@@ -1,4 +1,4 @@
-#include <iouring_runtime/core/Worker.h>
+#include <iouring/event/Worker.h>
 
 #include <gtest/gtest.h>
 
@@ -11,12 +11,12 @@ using namespace std::chrono_literals;
 
 namespace {
 
-iouring_runtime::core::io::SessionFactory NullSessionFactory() {
+iouring::net::SessionFactory NullSessionFactory() {
     return [](int,
-              iouring_runtime::core::ring::IoRing&,
-              iouring_runtime::core::buffer::BufferPool&,
-              iouring_runtime::core::ContextId)
-               -> iouring_runtime::core::io::SessionRef {
+              iouring::event::IoRing&,
+              iouring::core::buffer::BufferPool&,
+              iouring::core::ContextId)
+               -> iouring::net::SessionRef {
         return nullptr;
     };
 }
@@ -24,14 +24,14 @@ iouring_runtime::core::io::SessionFactory NullSessionFactory() {
 } // namespace
 
 TEST(Worker, PostFromNonRingThreadWakesDispatch) {
-    iouring_runtime::core::io::WorkerConfig config;
-    config.address = iouring_runtime::core::Address{"127.0.0.1", 0};
+    iouring::event::WorkerConfig config;
+    config.address = iouring::core::Address{"127.0.0.1", 0};
     config.io_timeout = 5s;
     config.ring.queue_depth = 64;
     config.ring.buf_ring.buf_count = 64;
     config.ring.buf_ring.buf_size = 1024;
 
-    iouring_runtime::core::io::Worker worker(config, NullSessionFactory());
+    iouring::event::Worker worker(config, NullSessionFactory());
     ASSERT_TRUE(worker.Start());
 
     std::promise<void> ran;

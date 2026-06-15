@@ -1,5 +1,5 @@
-#include <iouring_runtime/core/Session.h>
-#include <iouring_runtime/core/IoRing.h>
+#include <iouring/net/Session.h>
+#include <iouring/event/IoRing.h>
 
 #include <gtest/gtest.h>
 
@@ -15,10 +15,10 @@
 #include <thread>
 #include <unistd.h>
 
-using namespace iouring_runtime::core;
-using namespace iouring_runtime::core::io;
-using namespace iouring_runtime::core::ring;
-using namespace iouring_runtime::core::buffer;
+using namespace iouring::core;
+using namespace iouring::net;
+using namespace iouring::event;
+using namespace iouring::core::buffer;
 
 class TestSession : public Session {
 public:

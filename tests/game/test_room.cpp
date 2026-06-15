@@ -1,5 +1,5 @@
-#include <iouring_runtime/core/GlobalQueue.h>
-#include <iouring_runtime/game/Room.h>
+#include <iouring/event/GlobalQueue.h>
+#include <iouring/game/Room.h>
 
 #include <gtest/gtest.h>
 
@@ -8,11 +8,11 @@
 #include <span>
 #include <vector>
 
-using iouring_runtime::core::job::GlobalQueue;
-using iouring_runtime::game::PacketId;
-using iouring_runtime::game::PlayerId;
-using iouring_runtime::game::PlayerState;
-using iouring_runtime::game::Room;
+using iouring::event::GlobalQueue;
+using iouring::game::PacketId;
+using iouring::game::PlayerId;
+using iouring::game::PlayerState;
+using iouring::game::Room;
 
 namespace {
 

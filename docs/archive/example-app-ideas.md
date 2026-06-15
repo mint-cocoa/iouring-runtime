@@ -17,9 +17,9 @@ home k3s cluster:
 
 This repository currently exposes two useful layers for example apps:
 
-- `iouring_runtime::core`: protocol-agnostic TCP runtime with listeners,
+- `iouring::core`: protocol-agnostic TCP runtime with listeners,
   sessions, send/recv buffers, timers, watchdogs, and backpressure.
-- `iouring_runtime::web`: optional HTTP module with routing, middleware,
+- `iouring::http`: optional HTTP module with routing, middleware,
   request params, query/cookie helpers, response helpers, and `SendFile`.
 
 The best example app should show why this runtime exists without turning the
@@ -36,7 +36,7 @@ canary for the `io_uring` stack.
 
 ### Why This Fits
 
-- Uses the current `RuntimeWeb` stack directly.
+- Uses the current `iouring_http` stack directly.
 - Keeps persistence out of scope, so no database or secret handling is needed.
 - Exercises routing, middleware, timers, JSON responses, static assets, and
   health checks.
@@ -60,9 +60,9 @@ stay simple: one static HTML file, one CSS file, and no frontend build step.
 
 ### Implementation Plan
 
-- Add `app/examples/web/probe_board/`.
-- Build it only when `-DBUILD_WEB=ON -DBUILD_EXAMPLES=ON`.
-- Reuse the existing `WebServer` setup pattern from `app/examples/web/hello_http`.
+- Add `examples/http/probe_board/`.
+- Build it only when `-DBUILD_HTTP=ON -DBUILD_EXAMPLES=ON`.
+- Reuse the existing `WebServer` setup pattern from `examples/http/hello_http`.
 - Read config from environment variables:
   - `PROBE_BOARD_PORT`, default `3000`
   - `PROBE_BOARD_WORKERS`, default `1`
@@ -82,7 +82,7 @@ Use a multi-stage image:
 - builder: Debian/Ubuntu base with `cmake`, `ninja-build`, `g++`, `pkg-config`,
   and `liburing-dev`
 - runtime: slim Debian/Ubuntu with `liburing`
-- configure with `-DBUILD_WEB=ON -DBUILD_EXAMPLES=ON -DBUILD_TESTS=OFF`
+- configure with `-DBUILD_HTTP=ON -DBUILD_EXAMPLES=ON -DBUILD_TESTS=OFF`
 - copy only `probe_board` into the runtime image
 - expose container port `3000`
 - run as a non-root user if the base image setup stays simple
@@ -144,7 +144,7 @@ livenessProbe:
 
 ## Alternative 1: Minimal Todo API
 
-Build `todo-app` as a tiny JSON API over `RuntimeWeb`.
+Build `todo-app` as a tiny JSON API over `iouring_http`.
 
 Endpoints:
 
@@ -163,7 +163,7 @@ core.
 
 ## Alternative 2: Core TCP Latency Echo
 
-Build `tcp-latency-echo` directly on `iouring_runtime::core`.
+Build `tcp-latency-echo` directly on `iouring::core`.
 
 Protocol:
 
@@ -201,4 +201,4 @@ Start with `probe-board`.
 It gives the runtime repository a useful deployed example without introducing a
 database, auth, or application domain. It also creates a stable home-lab canary:
 if `probe-board.k8s.mintcocoa.cc/healthz` and the dashboard are healthy, the
-image build, ingress path, GitOps sync, and `RuntimeWeb` stack are all working.
+image build, ingress path, GitOps sync, and `iouring_http` stack are all working.

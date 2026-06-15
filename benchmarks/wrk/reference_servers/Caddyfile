@@ -1,0 +1,39 @@
+{
+    admin off
+    auto_https off
+}
+
+:8080 {
+    @health path /health
+    handle @health {
+        header Content-Type text/plain
+        respond "ok" 200
+    }
+
+    @root path /
+    handle @root {
+        header Content-Type text/plain
+        respond "hello from iouring_web" 200
+    }
+
+    handle /payload/256b {
+        root * /srv/www
+        rewrite * /payload-256b.txt
+        header Content-Type text/plain
+        file_server
+    }
+
+    handle /payload/4k {
+        root * /srv/www
+        rewrite * /payload-4k.txt
+        header Content-Type text/plain
+        file_server
+    }
+
+    handle /payload/64k {
+        root * /srv/www
+        rewrite * /payload-64k.txt
+        header Content-Type text/plain
+        file_server
+    }
+}

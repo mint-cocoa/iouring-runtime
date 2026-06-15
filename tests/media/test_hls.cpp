@@ -1,10 +1,10 @@
-#include <iouring_runtime/media/Hls.h>
+#include <iouring/media/Hls.h>
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-namespace media = iouring_runtime::media;
+namespace media = iouring::media;
 
 TEST(HlsMediaUtils, UrlEncodeDecodeRoundTrip) {
     const std::string raw = "https://cdn.example.test/a b/seg_01.ts?token=a+b&x=1";

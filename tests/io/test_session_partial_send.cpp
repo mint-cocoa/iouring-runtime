@@ -1,7 +1,7 @@
-#include <iouring_runtime/core/Session.h>
-#include <iouring_runtime/core/SessionDetail.h>
-#include <iouring_runtime/core/SendBuffer.h>
-#include <iouring_runtime/core/SendQueue.h>
+#include <iouring/net/Session.h>
+#include <iouring/net/SessionDetail.h>
+#include <iouring/core/SendBuffer.h>
+#include <iouring/core/SendQueue.h>
 
 #include <gtest/gtest.h>
 
@@ -12,9 +12,9 @@
 #include <sys/uio.h>
 #include <vector>
 
-using namespace iouring_runtime::core;
-using namespace iouring_runtime::core::io;
-using namespace iouring_runtime::core::buffer;
+using namespace iouring::core;
+using namespace iouring::net;
+using namespace iouring::core::buffer;
 
 namespace {
 

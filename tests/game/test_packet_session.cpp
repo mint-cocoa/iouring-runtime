@@ -1,5 +1,5 @@
-#include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/game/PacketSession.h>
+#include <iouring/event/IoRing.h>
+#include <iouring/game/PacketSession.h>
 
 #include <gtest/gtest.h>
 
@@ -22,11 +22,11 @@
 #include <unistd.h>
 #include <vector>
 
-using namespace iouring_runtime::core::buffer;
-using namespace iouring_runtime::core::ring;
-using iouring_runtime::game::PacketId;
-using iouring_runtime::game::PacketBuilder;
-using iouring_runtime::game::PacketSession;
+using namespace iouring::core::buffer;
+using namespace iouring::event;
+using iouring::game::PacketId;
+using iouring::game::PacketBuilder;
+using iouring::game::PacketSession;
 
 namespace {
 
@@ -166,7 +166,7 @@ struct PacketProbeStats {
 };
 
 class PacketBoundaryProbeSession final
-    : public iouring_runtime::core::io::Session {
+    : public iouring::net::Session {
 public:
     using Session::Session;
 

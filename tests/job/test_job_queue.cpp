@@ -1,6 +1,6 @@
-#include <iouring_runtime/core/GlobalQueue.h>
-#include <iouring_runtime/core/JobQueue.h>
-#include <iouring_runtime/core/JobTimer.h>
+#include <iouring/event/GlobalQueue.h>
+#include <iouring/event/JobQueue.h>
+#include <iouring/event/JobTimer.h>
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 
-using namespace iouring_runtime::core::job;
+using namespace iouring::event;
 
 // ── Basic functionality ──────────────────────────────────────
 

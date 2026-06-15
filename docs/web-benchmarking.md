@@ -20,20 +20,21 @@ Run the integrated runtime suite when you want Core echo, Web, Proxy, Game
 fan-out, and benchmark-only `epoll` references in one result directory:
 
 ```bash
-SUITE_MODE=quick ./scripts/run_runtime_bench_suite.sh
+SUITE_MODE=quick ./benchmarks/run_runtime_bench_suite.sh
 ```
 
 Standard mode repeats benchmark scenarios three times and writes median-ready
 artifacts under `benchmark-results/runtime-suite/<timestamp>/`:
 
 ```bash
-./scripts/run_runtime_bench_suite.sh
+./benchmarks/run_runtime_bench_suite.sh
 ```
 
-Run the default medium preset against `app/examples/web/hello_http`:
+Run the default medium preset against `hello_http` from
+`iouring-runtime-examples`:
 
 ```bash
-./scripts/run_hello_http_wrk.sh
+./benchmarks/run_hello_http_wrk.sh
 ```
 
 Available presets:
@@ -46,51 +47,51 @@ Available presets:
 Example:
 
 ```bash
-./scripts/run_hello_http_wrk.sh heavy
+./benchmarks/run_hello_http_wrk.sh heavy
 ```
 
 Run the multi-scenario suite and save raw results plus analysis:
 
 ```bash
-./scripts/run_hello_http_wrk_suite.sh
+./benchmarks/run_hello_http_wrk_suite.sh
 ```
 
 For a faster local pass:
 
 ```bash
-SUITE_MODE=quick ./scripts/run_hello_http_wrk_suite.sh
+SUITE_MODE=quick ./benchmarks/run_hello_http_wrk_suite.sh
 ```
 
 Run a configuration matrix across multiple `WebServerConfig` combinations:
 
 ```bash
-./scripts/run_hello_http_wrk_matrix.sh
+./benchmarks/run_hello_http_wrk_matrix.sh
 ```
 
 For a shorter pass:
 
 ```bash
-MATRIX_MODE=quick ./scripts/run_hello_http_wrk_matrix.sh
+MATRIX_MODE=quick ./benchmarks/run_hello_http_wrk_matrix.sh
 ```
 
-Compare the same `wrk` scenarios against `iouring_runtime`, `nginx`, and
+Compare the same `wrk` scenarios against `iouring`, `nginx`, and
 `caddy`:
 
 ```bash
-./scripts/run_reference_webserver_wrk_compare.sh
+./benchmarks/run_reference_webserver_wrk_compare.sh
 ```
 
 For a shorter pass:
 
 ```bash
-MODE=quick ./scripts/run_reference_webserver_wrk_compare.sh
+MODE=quick ./benchmarks/run_reference_webserver_wrk_compare.sh
 ```
 
 ## What The Script Does
 
 The script:
 
-1. configures a Release build with `BUILD_WEB=ON`
+1. configures a Release build with `BUILD_HTTP=ON`
 2. builds `hello_http`
 3. starts the server on `127.0.0.1:$PORT`
 4. waits for `/health`
@@ -107,7 +108,7 @@ Server logs are written to:
 You can override the defaults without editing the script:
 
 ```bash
-PORT=18080 THREADS=6 CONNECTIONS=192 DURATION=20s ./scripts/run_hello_http_wrk.sh medium
+PORT=18080 THREADS=6 CONNECTIONS=192 DURATION=20s ./benchmarks/run_hello_http_wrk.sh medium
 ```
 
 Supported variables:
@@ -178,7 +179,7 @@ For this repository, `wrk` is best used as a first-pass HTTP stability and
 throughput check. Pair it with the existing tests and sanitizer runs for a
 stronger confidence read.
 
-## Runtime Tuning
+## runtime Tuning
 
 `hello_http` currently exposes a few useful runtime knobs via environment
 variables:
@@ -190,13 +191,13 @@ variables:
 Examples:
 
 ```bash
-HELLO_HTTP_WORKERS=8 HELLO_HTTP_LOG_LEVEL=warn ./scripts/run_hello_http_wrk.sh medium
+HELLO_HTTP_WORKERS=8 HELLO_HTTP_LOG_LEVEL=warn ./benchmarks/run_hello_http_wrk.sh medium
 ```
 
 ```bash
-HELLO_HTTP_WORKERS=16 HELLO_HTTP_WORKER_AFFINITY=physical HELLO_HTTP_LOG_LEVEL=off ./scripts/run_hello_http_wrk.sh medium
+HELLO_HTTP_WORKERS=16 HELLO_HTTP_WORKER_AFFINITY=physical HELLO_HTTP_LOG_LEVEL=off ./benchmarks/run_hello_http_wrk.sh medium
 ```
 
 ```bash
-HELLO_HTTP_WORKERS=$(nproc) HELLO_HTTP_LOG_LEVEL=off MODE=quick ./scripts/run_reference_webserver_wrk_compare.sh
+HELLO_HTTP_WORKERS=$(nproc) HELLO_HTTP_LOG_LEVEL=off MODE=quick ./benchmarks/run_reference_webserver_wrk_compare.sh
 ```

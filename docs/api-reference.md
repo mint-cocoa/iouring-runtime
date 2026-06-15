@@ -13,130 +13,130 @@ Link:    one module target
 Include: only the public headers this file uses
 ```
 
-## Core Runtime
+## Core runtime
 
 Build option: enabled by default
 
 Target:
 
-- `iouring_runtime::Runtime`
+- `iouring::runtime`
 
 Headers:
 
-- `<iouring_runtime/core/IoRing.h>`
-- `<iouring_runtime/core/Listener.h>`
-- `<iouring_runtime/core/Session.h>`
-- `<iouring_runtime/core/SendBuffer.h>`
-- `<iouring_runtime/core/RecvBuffer.h>`
-- `<iouring_runtime/core/SendQueue.h>`
-- `<iouring_runtime/core/GlobalQueue.h>`
-- `<iouring_runtime/core/JobQueue.h>`
-- `<iouring_runtime/core/JobTimer.h>`
-- `<iouring_runtime/core/Types.h>`
+- `<iouring/event/IoRing.h>`
+- `<iouring/net/Listener.h>`
+- `<iouring/net/Session.h>`
+- `<iouring/core/SendBuffer.h>`
+- `<iouring/core/RecvBuffer.h>`
+- `<iouring/core/SendQueue.h>`
+- `<iouring/event/GlobalQueue.h>`
+- `<iouring/event/JobQueue.h>`
+- `<iouring/event/JobTimer.h>`
+- `<iouring/core/Types.h>`
 
 Primary types:
 
-- `iouring_runtime::core::ring::IoRing`
-- `iouring_runtime::core::ring::IoRingConfig`
-- `iouring_runtime::core::io::Listener`
-- `iouring_runtime::core::io::Session`
-- `iouring_runtime::core::io::SessionFactory`
-- `iouring_runtime::core::buffer::BufferPool`
-- `iouring_runtime::core::buffer::SendBuffer`
-- `iouring_runtime::core::buffer::RecvBuffer`
-- `iouring_runtime::core::buffer::SendQueue`
-- `iouring_runtime::core::job::GlobalQueue`
-- `iouring_runtime::core::job::JobQueue`
-- `iouring_runtime::core::job::JobTimer`
-- `iouring_runtime::core::Address`
-- `iouring_runtime::core::SessionId`
-- `iouring_runtime::core::ContextId`
+- `iouring::event::IoRing`
+- `iouring::event::IoRingConfig`
+- `iouring::net::Listener`
+- `iouring::net::Session`
+- `iouring::net::SessionFactory`
+- `iouring::core::buffer::BufferPool`
+- `iouring::core::buffer::SendBuffer`
+- `iouring::core::buffer::RecvBuffer`
+- `iouring::core::buffer::SendQueue`
+- `iouring::event::GlobalQueue`
+- `iouring::event::JobQueue`
+- `iouring::event::JobTimer`
+- `iouring::core::Address`
+- `iouring::core::SessionId`
+- `iouring::core::ContextId`
 
 Example:
 
 ```cmake
-target_link_libraries(my_echo PRIVATE iouring_runtime::Runtime)
+target_link_libraries(my_echo PRIVATE iouring::runtime)
 ```
 
 ```cpp
-#include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/core/Listener.h>
-#include <iouring_runtime/core/Session.h>
+#include <iouring/event/IoRing.h>
+#include <iouring/net/Listener.h>
+#include <iouring/net/Session.h>
 ```
 
 ## Web Module
 
-Build option: `-DBUILD_WEB=ON`
+Build option: `-DBUILD_HTTP=ON`
 
 Target:
 
-- `iouring_runtime_web::RuntimeWeb`
+- `iouring::http`
 
 Headers:
 
-- `<iouring_runtime/web/WebServer.h>`
-- `<iouring_runtime/web/Router.h>`
-- `<iouring_runtime/web/HttpRequest.h>`
-- `<iouring_runtime/web/HttpResponse.h>`
-- `<iouring_runtime/web/HttpStatus.h>`
-- `<iouring_runtime/web/HttpMethod.h>`
-- `<iouring_runtime/web/HttpParser.h>`
-- `<iouring_runtime/web/HttpSession.h>`
-- `<iouring_runtime/web/RadixTree.h>`
+- `<iouring/http/WebServer.h>`
+- `<iouring/http/Router.h>`
+- `<iouring/http/HttpRequest.h>`
+- `<iouring/http/HttpResponse.h>`
+- `<iouring/http/HttpStatus.h>`
+- `<iouring/http/HttpMethod.h>`
+- `<iouring/http/HttpParser.h>`
+- `<iouring/http/HttpSession.h>`
+- `<iouring/http/RadixTree.h>`
 
 Primary types:
 
-- `iouring_runtime::web::WebServer`
-- `iouring_runtime::web::WebServerConfig`
-- `iouring_runtime::web::RequestContext`
-- `iouring_runtime::web::Router`
-- `iouring_runtime::web::HttpRequest`
-- `iouring_runtime::web::HttpResponse`
-- `iouring_runtime::web::HttpStatus`
-- `iouring_runtime::web::HttpMethod`
-- `iouring_runtime::web::HttpHandler`
-- `iouring_runtime::web::HttpStreamHandler`
-- `iouring_runtime::web::HttpMiddleware`
+- `iouring::http::WebServer`
+- `iouring::http::WebServerConfig`
+- `iouring::http::RequestContext`
+- `iouring::http::Router`
+- `iouring::http::HttpRequest`
+- `iouring::http::HttpResponse`
+- `iouring::http::HttpStatus`
+- `iouring::http::HttpMethod`
+- `iouring::http::HttpHandler`
+- `iouring::http::HttpStreamHandler`
+- `iouring::http::HttpMiddleware`
 
 Example:
 
 ```cmake
-target_link_libraries(my_web_app PRIVATE iouring_runtime_web::RuntimeWeb)
+target_link_libraries(my_web_app PRIVATE iouring::http)
 ```
 
 ```cpp
-#include <iouring_runtime/web/WebServer.h>
-#include <iouring_runtime/web/HttpResponse.h>
+#include <iouring/http/WebServer.h>
+#include <iouring/http/HttpResponse.h>
 ```
 
 ## Proxy Module
 
-Build option: `-DBUILD_PROXY=ON`
+Build option: `-DBUILD_STREAM=ON`
 
 Target:
 
-- `iouring_runtime_proxy::RuntimeProxy`
+- `iouring::stream`
 
 Headers:
 
-- `<iouring_runtime/proxy/TcpProxyServer.h>`
-- `<iouring_runtime/proxy/AcmeHttpChallengeServer.h>`
+- `<iouring/stream/TcpProxyServer.h>`
+- `<iouring/stream/AcmeHttpChallengeServer.h>`
 
 Primary types:
 
-- `iouring_runtime::proxy::TcpProxyConfig`
-- `iouring_runtime::proxy::TcpProxyServer`
-- `iouring_runtime::proxy::AcmeHttpChallengeConfig`
-- `iouring_runtime::proxy::AcmeHttpChallengeServer`
+- `iouring::stream::TcpProxyConfig`
+- `iouring::stream::TcpProxyServer`
+- `iouring::stream::AcmeHttpChallengeConfig`
+- `iouring::stream::AcmeHttpChallengeServer`
 
 Example:
 
 ```cmake
-target_link_libraries(my_proxy PRIVATE iouring_runtime_proxy::RuntimeProxy)
+target_link_libraries(my_proxy PRIVATE iouring::stream)
 ```
 
 ```cpp
-#include <iouring_runtime/proxy/TcpProxyServer.h>
+#include <iouring/stream/TcpProxyServer.h>
 ```
 
 ## Game Module
@@ -145,39 +145,39 @@ Build option: `-DBUILD_GAME=ON`
 
 Target:
 
-- `iouring_runtime_game::RuntimeGame`
+- `iouring::game`
 
 Headers:
 
-- `<iouring_runtime/game/PacketSession.h>`
-- `<iouring_runtime/game/PacketBuilder.h>`
-- `<iouring_runtime/game/PlayerRegistry.h>`
-- `<iouring_runtime/game/Room.h>`
-- `<iouring_runtime/game/RoomManager.h>`
-- `<iouring_runtime/game/Types.h>`
+- `<iouring/game/PacketSession.h>`
+- `<iouring/game/PacketBuilder.h>`
+- `<iouring/game/PlayerRegistry.h>`
+- `<iouring/game/Room.h>`
+- `<iouring/game/RoomManager.h>`
+- `<iouring/game/Types.h>`
 
 Primary types:
 
-- `iouring_runtime::game::PacketSession`
-- `iouring_runtime::game::PacketBuilder`
-- `iouring_runtime::game::PacketId`
-- `iouring_runtime::game::PlayerRegistry`
-- `iouring_runtime::game::PlayerRecord`
-- `iouring_runtime::game::PlayerState`
-- `iouring_runtime::game::Room`
-- `iouring_runtime::game::RoomLike`
-- `iouring_runtime::game::RoomManager`
-- `iouring_runtime::game::RoomManager::RoomInfo`
+- `iouring::game::PacketSession`
+- `iouring::game::PacketBuilder`
+- `iouring::game::PacketId`
+- `iouring::game::PlayerRegistry`
+- `iouring::game::PlayerRecord`
+- `iouring::game::PlayerState`
+- `iouring::game::Room`
+- `iouring::game::RoomLike`
+- `iouring::game::RoomManager`
+- `iouring::game::RoomManager::RoomInfo`
 
 Example:
 
 ```cmake
-target_link_libraries(my_game PRIVATE iouring_runtime_game::RuntimeGame)
+target_link_libraries(my_game PRIVATE iouring::game)
 ```
 
 ```cpp
-#include <iouring_runtime/game/PacketSession.h>
-#include <iouring_runtime/game/RoomManager.h>
+#include <iouring/game/PacketSession.h>
+#include <iouring/game/RoomManager.h>
 ```
 
 ## Media Helpers
@@ -186,11 +186,11 @@ Build option: enabled by default
 
 Target:
 
-- `iouring_runtime::RuntimeMedia`
+- `iouring::media`
 
 Headers:
 
-- `<iouring_runtime/media/Hls.h>`
+- `<iouring/media/Hls.h>`
 
 Use this target for HLS manifest rewriting, URL decoding, and HLS content type
 helpers.
@@ -201,12 +201,12 @@ Build option: enabled by default
 
 Target:
 
-- `iouring_runtime::RuntimeObservability`
+- `iouring::observability`
 
 Headers:
 
-- `<iouring_runtime/observability/Logging.h>`
-- `<iouring_runtime/observability/Profiler.h>`
+- `<iouring/observability/Logging.h>`
+- `<iouring/observability/Profiler.h>`
 
 Use this target for logging helpers shared by runtime modules and examples.
 
@@ -215,16 +215,16 @@ Use this target for logging helpers shared by runtime modules and examples.
 The core package is always produced:
 
 ```cmake
-find_package(iouring_runtime CONFIG REQUIRED)
+find_package(iouring CONFIG REQUIRED)
 ```
 
 Optional packages are produced only when their build option is enabled:
 
 ```cmake
-find_package(iouring_runtime_web CONFIG REQUIRED)
-find_package(iouring_runtime_proxy CONFIG REQUIRED)
-find_package(iouring_runtime_game CONFIG REQUIRED)
+find_package(iouring CONFIG REQUIRED)
+find_package(iouring_proxy CONFIG REQUIRED)
+find_package(iouring CONFIG REQUIRED)
 ```
 
-The optional packages depend on `iouring_runtime`, so consumers usually only
+The optional packages depend on `iouring`, so consumers usually only
 need to link the highest-level module target they use.

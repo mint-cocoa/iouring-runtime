@@ -1,17 +1,17 @@
-#include <iouring_runtime/game/PlayerRegistry.h>
-#include <iouring_runtime/game/Room.h>
+#include <iouring/game/PlayerRegistry.h>
+#include <iouring/game/Room.h>
 
 #include <gtest/gtest.h>
 
-using iouring_runtime::game::PacketId;
-using iouring_runtime::game::PlayerRegistry;
-using iouring_runtime::game::RoomLike;
+using iouring::game::PacketId;
+using iouring::game::PlayerRegistry;
+using iouring::game::RoomLike;
 
 namespace {
 
 class TestRoom final : public RoomLike {
 public:
-    void HandlePacket(iouring_runtime::game::PlayerId, PacketId,
+    void HandlePacket(iouring::game::PlayerId, PacketId,
                       std::span<const std::byte>) override {}
 };
 

@@ -40,7 +40,7 @@ Install:
 Optional:
 
 - `docker`
-  for `scripts/run_reference_webserver_wrk_compare.sh`
+  for `benchmarks/run_reference_webserver_wrk_compare.sh`
 - `pidstat` and `mpstat`
   for richer CPU-side analysis
 
@@ -98,11 +98,19 @@ Use a clean release build for benchmark runs.
 ```bash
 cmake -S . -B build-web-bench \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_WEB=ON \
-  -DBUILD_EXAMPLES=ON \
+  -DBUILD_HTTP=ON \
   -DBUILD_TESTS=OFF
 
-cmake --build build-web-bench --target hello_http -j"$(nproc)"
+cmake --build build-web-bench -j"$(nproc)"
+cmake --install build-web-bench --prefix /tmp/iouring-install
+
+cmake -S ../iouring-runtime-examples -B ../iouring-runtime-examples/build-web-bench \
+  -DCMAKE_PREFIX_PATH=/tmp/iouring-install \
+  -DBUILD_CORE_EXAMPLES=OFF \
+  -DBUILD_STREAM_EXAMPLES=OFF \
+  -DBUILD_GAME_EXAMPLES=OFF \
+  -DBUILD_ACTIVITY_EXAMPLES=OFF
+cmake --build ../iouring-runtime-examples/build-web-bench --target hello_http -j"$(nproc)"
 ```
 
 ## Recommended Benchmark Order
@@ -112,25 +120,25 @@ Run the scripts in this order.
 ### 1. Quick Sanity Check
 
 ```bash
-HELLO_HTTP_LOG_LEVEL=off ./scripts/run_hello_http_wrk.sh medium
+HELLO_HTTP_LOG_LEVEL=off ./benchmarks/run_hello_http_wrk.sh medium
 ```
 
 ### 2. Multi-Scenario Suite
 
 ```bash
-HELLO_HTTP_LOG_LEVEL=off SUITE_MODE=quick ./scripts/run_hello_http_wrk_suite.sh
+HELLO_HTTP_LOG_LEVEL=off SUITE_MODE=quick ./benchmarks/run_hello_http_wrk_suite.sh
 ```
 
 ### 3. Worker And Ring Matrix
 
 ```bash
-HELLO_HTTP_LOG_LEVEL=off MATRIX_MODE=quick ./scripts/run_hello_http_wrk_matrix.sh
+HELLO_HTTP_LOG_LEVEL=off MATRIX_MODE=quick ./benchmarks/run_hello_http_wrk_matrix.sh
 ```
 
 ### 4. Worker vs `wrk -t` Thread Matrix
 
 ```bash
-HELLO_HTTP_LOG_LEVEL=off MATRIX_MODE=quick ./scripts/run_hello_http_wrk_thread_matrix.sh
+HELLO_HTTP_LOG_LEVEL=off MATRIX_MODE=quick ./benchmarks/run_hello_http_wrk_thread_matrix.sh
 ```
 
 ### 5. Reference Server Comparison
@@ -138,7 +146,7 @@ HELLO_HTTP_LOG_LEVEL=off MATRIX_MODE=quick ./scripts/run_hello_http_wrk_thread_m
 Run this only if Docker is available.
 
 ```bash
-HELLO_HTTP_LOG_LEVEL=off MODE=quick ./scripts/run_reference_webserver_wrk_compare.sh
+HELLO_HTTP_LOG_LEVEL=off MODE=quick ./benchmarks/run_reference_webserver_wrk_compare.sh
 ```
 
 ## Affinity Verification
@@ -149,21 +157,21 @@ If you want to compare scheduler behavior with worker pinning:
 HELLO_HTTP_WORKERS=16 \
 HELLO_HTTP_WORKER_AFFINITY=off \
 HELLO_HTTP_LOG_LEVEL=off \
-./scripts/run_hello_http_wrk.sh medium
+./benchmarks/run_hello_http_wrk.sh medium
 ```
 
 ```bash
 HELLO_HTTP_WORKERS=16 \
 HELLO_HTTP_WORKER_AFFINITY=physical \
 HELLO_HTTP_LOG_LEVEL=off \
-./scripts/run_hello_http_wrk.sh medium
+./benchmarks/run_hello_http_wrk.sh medium
 ```
 
 ```bash
 HELLO_HTTP_WORKERS=16 \
 HELLO_HTTP_WORKER_AFFINITY=logical \
 HELLO_HTTP_LOG_LEVEL=off \
-./scripts/run_hello_http_wrk.sh medium
+./benchmarks/run_hello_http_wrk.sh medium
 ```
 
 On SMT systems, `physical` usually pins workers to one sibling per core first,

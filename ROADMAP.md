@@ -4,7 +4,7 @@
 
 - Stabilize `IoRing`, `Listener`, and `Session`
 - Keep the repo runtime-only
-- Verify `find_package(iouring_runtime)` install flow
+- Verify `find_package(iouring)` install flow
 - Ship runtime examples and focused lifecycle tests
 
 ## v0.2
@@ -12,7 +12,7 @@
 - Tighten runtime contract documentation
 - Add stronger shutdown, drain, and slow-client coverage
 - Improve counters and diagnostics for runtime state
-- Clarify the remaining namespace transition story around `iouring_runtime::core::...`
+- Clarify the remaining namespace transition story around `iouring::core::...`
 
 ## v0.3
 

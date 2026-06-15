@@ -1,12 +1,12 @@
-#include <iouring_runtime/observability/Logging.h>
+#include <iouring/observability/Logging.h>
 
 #include <gtest/gtest.h>
 
 namespace {
-using iouring_runtime::observability::LogLevel;
-using iouring_runtime::observability::ParseLogLevel;
-using iouring_runtime::observability::ConfigureLogging;
-using iouring_runtime::observability::ShouldLog;
+using iouring::observability::LogLevel;
+using iouring::observability::ParseLogLevel;
+using iouring::observability::ConfigureLogging;
+using iouring::observability::ShouldLog;
 
 TEST(ObservabilityLoggingTest, ParsesKnownLogLevels) {
     EXPECT_EQ(ParseLogLevel("trace"), LogLevel::kTrace);

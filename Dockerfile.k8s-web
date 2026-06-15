@@ -17,7 +17,7 @@ COPY . .
 
 RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_WEB=ON \
+        -DBUILD_HTTP=ON \
         -DBUILD_EXAMPLES=ON \
         -DBUILD_ACTIVITY_SERVER=OFF \
         -DBUILD_TESTS=OFF \
@@ -37,7 +37,7 @@ RUN useradd --system --uid 10003 --home-dir /nonexistent --shell /usr/sbin/nolog
 COPY --from=build /src/build/bin/hello_http /usr/local/bin/hello_http
 COPY --from=build /src/build/bin/status_server /usr/local/bin/status_server
 COPY --from=build /src/build/bin/speedtest_server /usr/local/bin/speedtest_server
-COPY --from=build /src/app/examples/web/speedtest_server/public /usr/share/iouring-runtime/openspeedtest
+COPY --from=build /src/examples/http/speedtest_server/public /usr/share/iouring-runtime/openspeedtest
 
 USER iouring
 ENV HELLO_HTTP_HOST=0.0.0.0 \

@@ -1,4 +1,4 @@
-#include <iouring_runtime/web/HttpResponse.h>
+#include <iouring/http/HttpResponse.h>
 
 #include <gtest/gtest.h>
 
@@ -6,8 +6,8 @@
 #include <string_view>
 #include <vector>
 
-using namespace iouring_runtime::web;
-using iouring_runtime::core::buffer::BufferPool;
+using namespace iouring::http;
+using iouring::core::buffer::BufferPool;
 
 namespace {
 
@@ -21,7 +21,7 @@ std::string Serialize(const HttpResponse& response, BufferPool& pool) {
 }
 
 std::string SerializeBuffers(
-    const std::vector<iouring_runtime::core::buffer::SendBufferRef>& buffers) {
+    const std::vector<iouring::core::buffer::SendBufferRef>& buffers) {
     std::string out;
     for (const auto& buffer : buffers) {
         const auto data = buffer->Data();

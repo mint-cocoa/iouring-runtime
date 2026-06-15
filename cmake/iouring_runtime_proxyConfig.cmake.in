@@ -1,8 +1,0 @@
-@PACKAGE_INIT@
-
-include(CMakeFindDependencyMacro)
-
-find_dependency(iouring_runtime CONFIG REQUIRED)
-find_dependency(OpenSSL REQUIRED)
-
-include("${CMAKE_CURRENT_LIST_DIR}/@IORUNTIME_PROXY_PACKAGE_NAME@Targets.cmake")

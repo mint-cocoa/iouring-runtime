@@ -26,7 +26,7 @@
   </defs>
 
   <rect class="bg" width="1040" height="620"/>
-  <text class="title" x="520" y="54" text-anchor="middle">Core Runtime Model</text>
+  <text class="title" x="520" y="54" text-anchor="middle">Core runtime Model</text>
   <text class="small" x="520" y="80" text-anchor="middle">One worker thread owns one ring, one buffer pool, listeners, and accepted sessions.</text>
 
   <rect class="pool" x="52" y="112" width="936" height="456" rx="10"/>

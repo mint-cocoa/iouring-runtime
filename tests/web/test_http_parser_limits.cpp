@@ -1,4 +1,4 @@
-#include <iouring_runtime/web/HttpParser.h>
+#include <iouring/http/HttpParser.h>
 
 #include <gtest/gtest.h>
 
@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-using namespace iouring_runtime::web;
+using namespace iouring::http;
 
 namespace {
 

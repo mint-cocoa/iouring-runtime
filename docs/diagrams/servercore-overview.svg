@@ -49,7 +49,7 @@
   <path class="arrow" d="M 480 338 L 480 374"/>
 
   <rect class="core" x="190" y="374" width="580" height="78" rx="8"/>
-  <text class="label" x="480" y="407" text-anchor="middle">Core Runtime</text>
+  <text class="label" x="480" y="407" text-anchor="middle">Core runtime</text>
   <text class="small" x="480" y="430" text-anchor="middle">accept, recv, send, timeout, cancel, buffers, sessions, cross-thread posts</text>
 
   <path class="arrow" d="M 480 452 L 480 488"/>

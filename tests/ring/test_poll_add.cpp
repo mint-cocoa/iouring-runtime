@@ -1,11 +1,11 @@
-#include <iouring_runtime/core/IoRing.h>
+#include <iouring/event/IoRing.h>
 #include <gtest/gtest.h>
 #include <memory>
 #include <sys/eventfd.h>
 #include <poll.h>
 #include <unistd.h>
 
-using namespace iouring_runtime::core::ring;
+using namespace iouring::event;
 
 class PollObject : public std::enable_shared_from_this<PollObject> {
 public:

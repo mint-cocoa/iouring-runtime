@@ -1,4 +1,4 @@
-#include <iouring_runtime/core/IoRing.h>
+#include <iouring/event/IoRing.h>
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 #include <string_view>
 #include <unistd.h>
 
-using namespace iouring_runtime::core::ring;
+using namespace iouring::event;
 
 namespace {
 

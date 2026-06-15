@@ -17,7 +17,7 @@ COPY . .
 
 RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_WEB=ON \
+        -DBUILD_HTTP=ON \
         -DBUILD_EXAMPLES=ON \
         -DBUILD_ACTIVITY_SERVER=OFF \
         -DBUILD_TESTS=OFF \
@@ -35,7 +35,7 @@ RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nolog
     && chown -R dropapp:dropapp /data
 
 COPY --from=build /src/build/bin/dropapp /usr/local/bin/dropapp
-COPY --from=build /src/app/examples/web/dropapp/static /usr/share/dropapp/static
+COPY --from=build /src/examples/http/dropapp/static /usr/share/dropapp/static
 
 USER dropapp
 ENV DROPAPP_HOST=0.0.0.0 \

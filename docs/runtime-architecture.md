@@ -1,4 +1,4 @@
-# Runtime Architecture
+# runtime Architecture
 
 This is a maintainer note for the current module layout. For user-facing
 examples, start with `docs/getting-started.md` and `docs/usage-examples.md`.
@@ -12,15 +12,15 @@ C++ include:  per-file public API selection
 
 | Module | Target | Source | Public headers |
 | --- | --- | --- | --- |
-| Core runtime | `iouring_runtime::Runtime` | `src/runtime/` | `include/iouring_runtime/core/` |
-| Observability | `iouring_runtime::RuntimeObservability` | `src/modules/observability/` | `include/iouring_runtime/observability/` |
-| Media | `iouring_runtime::RuntimeMedia` | `src/modules/media/` | `include/iouring_runtime/media/` |
-| Web | `iouring_runtime_web::RuntimeWeb` | `src/modules/web/` | `include/iouring_runtime/web/` |
-| Proxy | `iouring_runtime_proxy::RuntimeProxy` | `src/modules/proxy/` | `include/iouring_runtime/proxy/` |
-| Game | `iouring_runtime_game::RuntimeGame` | `src/modules/game/` | `include/iouring_runtime/game/` |
+| Core runtime | `iouring::runtime` | `src/core/` | `include/iouring/core/` |
+| Observability | `iouring::observability` | `src/observability/` | `include/iouring/observability/` |
+| Media | `iouring::media` | `src/media/` | `include/iouring/media/` |
+| Web | `iouring::http` | `src/http/` | `include/iouring/http/` |
+| Proxy | `iouring::stream` | `src/stream/` | `include/iouring/stream/` |
+| Game | `iouring::game` | `src/game/` | `include/iouring/game/` |
 
 The core target is protocol-agnostic. Web, proxy, and game code build on top of
-core without moving protocol concepts into `include/iouring_runtime/core/`.
+core without moving protocol concepts into `include/iouring/core/`.
 
 ## Core Responsibilities
 
@@ -72,7 +72,7 @@ timeout.
 
 ## Optional Modules
 
-`RuntimeWeb` adds:
+`iouring::http` adds:
 
 - HTTP parsing
 - route matching
@@ -82,7 +82,7 @@ timeout.
 - file and streaming responses
 - worker-thread server wrapper
 
-`RuntimeProxy` adds:
+`iouring::stream` adds:
 
 - downstream TCP listener
 - upstream connector
@@ -92,7 +92,7 @@ timeout.
 - standalone ACME HTTP-01 challenge server
 - metrics snapshots
 
-`RuntimeGame` adds:
+`iouring::game` adds:
 
 - packet framing
 - packet builder helpers
@@ -123,5 +123,5 @@ ctest --test-dir build-tests --output-on-failure
 Run sanitizer builds:
 
 ```bash
-./scripts/run_runtime_sanitizers.sh
+./tools/run_runtime_sanitizers.sh
 ```

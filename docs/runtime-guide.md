@@ -1,22 +1,30 @@
-# Core Runtime Guide
+# Core runtime Guide
 
-Use `iouring_runtime::Runtime` when you want a custom TCP protocol instead of
+Use `iouring::runtime` when you want a custom TCP protocol instead of
 HTTP, proxying, or the game packet helpers.
 
 ## Build The Example
 
 ```bash
-cmake -S . -B build-core \
+cmake -S . -B build-runtime \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_EXAMPLES=ON \
   -DBUILD_TESTS=OFF
-cmake --build build-core --target core_echo core_idle_echo -j$(nproc)
+cmake --build build-runtime -j$(nproc)
+cmake --install build-runtime --prefix /tmp/iouring-install
+
+cmake -S ../iouring-runtime-examples -B ../iouring-runtime-examples/build-core \
+  -DCMAKE_PREFIX_PATH=/tmp/iouring-install \
+  -DBUILD_HTTP_EXAMPLES=OFF \
+  -DBUILD_STREAM_EXAMPLES=OFF \
+  -DBUILD_GAME_EXAMPLES=OFF \
+  -DBUILD_ACTIVITY_EXAMPLES=OFF
+cmake --build ../iouring-runtime-examples/build-core --target core_echo core_idle_echo -j$(nproc)
 ```
 
 Run:
 
 ```bash
-CORE_ECHO_PORT=19090 ./build-core/bin/core_echo
+CORE_ECHO_PORT=19090 ../iouring-runtime-examples/build-core/bin/core_echo
 ```
 
 Try it:
@@ -25,14 +33,14 @@ Try it:
 printf 'hello\n' | nc 127.0.0.1 19090
 ```
 
-## Link The Runtime
+## Link The runtime
 
 ```cmake
-find_package(iouring_runtime CONFIG REQUIRED)
+find_package(iouring CONFIG REQUIRED)
 
 add_executable(my_tcp_server src/main.cpp)
 target_link_libraries(my_tcp_server PRIVATE
-    iouring_runtime::Runtime
+    iouring::runtime
 )
 target_compile_features(my_tcp_server PRIVATE cxx_std_23)
 ```
@@ -40,11 +48,11 @@ target_compile_features(my_tcp_server PRIVATE cxx_std_23)
 ## Include What You Use
 
 ```cpp
-#include <iouring_runtime/core/IoRing.h>
-#include <iouring_runtime/core/Listener.h>
-#include <iouring_runtime/core/SendBuffer.h>
-#include <iouring_runtime/core/Session.h>
-#include <iouring_runtime/core/Types.h>
+#include <iouring/event/IoRing.h>
+#include <iouring/net/Listener.h>
+#include <iouring/core/SendBuffer.h>
+#include <iouring/net/Session.h>
+#include <iouring/core/Types.h>
 ```
 
 ## Define A Session
@@ -53,7 +61,7 @@ A `Session` owns socket I/O, recv registration, send queue draining, timeout
 hooks, and disconnect state. Your subclass implements protocol behavior.
 
 ```cpp
-class EchoSession final : public iouring_runtime::core::io::Session {
+class EchoSession final : public iouring::net::Session {
 public:
     using Session::Session;
 
@@ -90,23 +98,23 @@ A `Worker` owns one `IoRing`, one `BufferPool`, one `Listener`, a thread, and
 the sessions accepted by that listener.
 
 ```cpp
-iouring_runtime::core::io::SessionFactory factory =
+iouring::net::SessionFactory factory =
     [](int fd,
-       iouring_runtime::core::ring::IoRing& ring,
-       iouring_runtime::core::buffer::BufferPool& pool,
-       iouring_runtime::core::ContextId)
-        -> iouring_runtime::core::io::SessionRef {
+       iouring::event::IoRing& ring,
+       iouring::core::buffer::BufferPool& pool,
+       iouring::core::ContextId)
+        -> iouring::net::SessionRef {
     return std::make_shared<EchoSession>(fd, ring, pool);
 };
 
-iouring_runtime::core::io::WorkerConfig config;
+iouring::event::WorkerConfig config;
 config.address = {
     .host = "0.0.0.0",
     .port = 19090,
 };
 config.io_timeout = std::chrono::milliseconds{10};
 
-iouring_runtime::core::io::Worker worker(config, std::move(factory));
+iouring::event::Worker worker(config, std::move(factory));
 if (!worker.Start()) {
     return 1;
 }
@@ -128,8 +136,8 @@ worker.Stop();
 If you use `GlobalQueue`, drain posted jobs from a worker tick hook:
 
 ```cpp
-iouring_runtime::core::io::WorkerHooks hooks;
-hooks.tick = [&global_queue](iouring_runtime::core::io::Worker&) {
+iouring::event::WorkerHooks hooks;
+hooks.tick = [&global_queue](iouring::event::Worker&) {
     while (auto* queue = global_queue.TryPop()) {
         queue->Execute();
     }
@@ -151,8 +159,8 @@ tracking should live in protocol modules or application code.
 Use core directly for binary protocols, experiments, and custom transport
 behavior. Use a higher module when the protocol layer already matches the app:
 
-- HTTP app: `iouring_runtime_web::RuntimeWeb`
-- TCP reverse proxy: `iouring_runtime_proxy::RuntimeProxy`
-- packet game server: `iouring_runtime_game::RuntimeGame`
+- HTTP app: `iouring::http`
+- TCP reverse proxy: `iouring::stream`
+- packet game server: `iouring::game`
 
 See `docs/usage-examples.md` for those snippets.

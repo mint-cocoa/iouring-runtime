@@ -1,4 +1,4 @@
-#include <iouring_runtime/game/PacketBuilder.h>
+#include <iouring/game/PacketBuilder.h>
 
 #include <gtest/gtest.h>
 
@@ -7,9 +7,9 @@
 #include <cstring>
 #include <vector>
 
-using iouring_runtime::core::buffer::BufferPool;
-using iouring_runtime::game::PacketId;
-using iouring_runtime::game::PacketBuilder;
+using iouring::core::buffer::BufferPool;
+using iouring::game::PacketId;
+using iouring::game::PacketBuilder;
 
 namespace {
 

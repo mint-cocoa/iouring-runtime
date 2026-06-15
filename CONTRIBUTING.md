@@ -18,7 +18,7 @@ ctest --test-dir build --output-on-failure
 
 ## What Good Contributions Look Like
 
-- Runtime contract clarifications
+- runtime contract clarifications
 - Lifecycle, timeout, and shutdown fixes
 - Backpressure and queue-behavior improvements
 - New runtime-only examples
@@ -37,7 +37,7 @@ Those should live in higher-level libraries built on top of the runtime.
 ## Patch Guidelines
 
 - Keep headers and implementation ASCII unless a file already uses Unicode.
-- Prefer `iouring_runtime/core/...` include paths in examples, tests, and new code.
+- Prefer `iouring/core/...` include paths in examples, tests, and new code.
 - Add tests for behavior changes, especially around shutdown, pending I/O, and timeouts.
 - Avoid breaking the installed package surface without updating docs and smoke tests.
 

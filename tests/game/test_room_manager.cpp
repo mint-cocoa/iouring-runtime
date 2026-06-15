@@ -1,14 +1,14 @@
-#include <iouring_runtime/core/GlobalQueue.h>
-#include <iouring_runtime/game/RoomManager.h>
+#include <iouring/event/GlobalQueue.h>
+#include <iouring/game/RoomManager.h>
 
 #include <gtest/gtest.h>
 
 #include <memory>
 #include <string>
 
-using iouring_runtime::core::job::GlobalQueue;
-using iouring_runtime::game::Room;
-using iouring_runtime::game::RoomManager;
+using iouring::event::GlobalQueue;
+using iouring::game::Room;
+using iouring::game::RoomManager;
 
 namespace {
 

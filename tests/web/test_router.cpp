@@ -1,6 +1,6 @@
-#include <iouring_runtime/web/Router.h>
-#include <iouring_runtime/web/HttpSession.h>
-#include <iouring_runtime/web/RadixTree.h>
+#include <iouring/http/Router.h>
+#include <iouring/http/HttpSession.h>
+#include <iouring/http/RadixTree.h>
 
 #include <gtest/gtest.h>
 
@@ -9,12 +9,12 @@
 #include <string_view>
 #include <utility>
 
-using namespace iouring_runtime::web;
+using namespace iouring::http;
 
 namespace {
 
 RequestContext MakeContext(HttpRequest& request, HttpResponse& response,
-                           iouring_runtime::core::buffer::BufferPool& pool) {
+                           iouring::core::buffer::BufferPool& pool) {
     auto* session = reinterpret_cast<HttpSession*>(0x1);
     return RequestContext{
         .session = *session,
@@ -27,7 +27,7 @@ RequestContext MakeContext(HttpRequest& request, HttpResponse& response,
 }
 
 std::string Serialize(const HttpResponse& response,
-                      iouring_runtime::core::buffer::BufferPool& pool) {
+                      iouring::core::buffer::BufferPool& pool) {
     auto buffer = response.Build(pool);
     if (!buffer) {
         return {};
@@ -114,7 +114,7 @@ TEST_F(RouterTest, ExactMatchGet) {
     request.path = "/";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router_.Dispatch(ctx);
@@ -129,7 +129,7 @@ TEST_F(RouterTest, PathParamsAreExposedToHandlers) {
     request.path = "/users/42";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router_.Dispatch(ctx);
@@ -147,7 +147,7 @@ TEST_F(RouterTest, ParamDecodedDecodesPercentEscapes) {
     request.path = "/people/Jane%20Doe";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router_.Dispatch(ctx);
@@ -161,7 +161,7 @@ TEST_F(RouterTest, HeadFallsBackToGetAndSuppressesBody) {
     request.path = "/users/42";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router_.Dispatch(ctx);
@@ -178,7 +178,7 @@ TEST_F(RouterTest, UnknownPathReturns404) {
     request.path = "/missing";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router_.Dispatch(ctx);
@@ -193,7 +193,7 @@ TEST_F(RouterTest, WrongMethodReturns405) {
     request.path = "/users/42";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router_.Dispatch(ctx);
@@ -211,7 +211,7 @@ TEST_F(RouterTest, MiddlewareCanAnnotateResponseBeforeHandler) {
     request.path = "/users/42";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router_.Dispatch(ctx);
@@ -239,7 +239,7 @@ TEST(RouterMiddleware, MiddlewareCanShortCircuitDispatch) {
     request.path = "/private";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router.Dispatch(ctx);
@@ -256,7 +256,7 @@ TEST_F(RouterTest, HandlerExceptionReturns500) {
     request.path = "/throw";
 
     HttpResponse response;
-    iouring_runtime::core::buffer::BufferPool pool;
+    iouring::core::buffer::BufferPool pool;
     auto ctx = MakeContext(request, response, pool);
 
     router_.Dispatch(ctx);

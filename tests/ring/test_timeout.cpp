@@ -1,4 +1,4 @@
-#include <iouring_runtime/core/IoRing.h>
+#include <iouring/event/IoRing.h>
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 #include <memory>
 #include <thread>
 
-using namespace iouring_runtime::core::ring;
+using namespace iouring::event;
 using namespace std::chrono_literals;
 
 namespace {

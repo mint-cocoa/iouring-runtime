@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-yt-dlp
-websockets
-python-multipart
-httpx
-playwright

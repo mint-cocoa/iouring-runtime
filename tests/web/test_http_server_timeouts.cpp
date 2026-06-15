@@ -1,4 +1,4 @@
-#include <iouring_runtime/web/WebServer.h>
+#include <iouring/http/WebServer.h>
 
 #include <gtest/gtest.h>
 
@@ -17,7 +17,7 @@
 #include <thread>
 #include <vector>
 
-using namespace iouring_runtime::web;
+using namespace iouring::http;
 using namespace std::chrono_literals;
 
 namespace {

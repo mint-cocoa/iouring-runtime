@@ -1,8 +1,8 @@
-# io_uring Runtime Plan
+# io_uring runtime Plan
 
 ## Goal
 
-Turn the repository into a clearly legible standalone `io_uring Runtime`
+Turn the repository into a clearly legible standalone `io_uring runtime`
 product:
 
 - protocol-agnostic
@@ -20,12 +20,12 @@ Target shape for downstream consumers:
 ```text
 App
   -> Lib
-     -> Runtime(iouring-runtime)
+     -> iouring(iouring-runtime)
 ```
 
-## Runtime definition
+## iouring definition
 
-`Runtime` is the execution substrate. It should own:
+`iouring` is the execution substrate. It should own:
 
 - `io_uring` setup and dispatch
 - listener accept flow
@@ -53,7 +53,7 @@ The repository already has a strong starting point:
 - `src/ring/*`
 - `src/job/*`
 - `tests/io/*`
-- `app/examples/runtime/core_echo/`
+- `examples/core/core_echo/`
 
 The main remaining gap is not “missing runtime code” so much as “runtime
 identity is still easier to miss than the web framework layer”.
@@ -72,7 +72,7 @@ Deliverables:
 
 ### Phase 1: boundary freeze
 
-Keep `Runtime` protocol-agnostic.
+Keep `iouring` protocol-agnostic.
 
 Rules:
 

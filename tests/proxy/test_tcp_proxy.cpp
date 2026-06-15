@@ -1,5 +1,5 @@
-#include <iouring_runtime/proxy/AcmeHttpChallengeServer.h>
-#include <iouring_runtime/proxy/TcpProxyServer.h>
+#include <iouring/stream/AcmeHttpChallengeServer.h>
+#include <iouring/stream/TcpProxyServer.h>
 
 #include <gtest/gtest.h>
 
@@ -582,7 +582,7 @@ std::string TlsRecvExact(SSL* ssl, std::size_t bytes) {
 TEST(TcpProxyServerTest, ProxiesTcpTrafficToUpstream) {
     EchoServer upstream;
 
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring::stream::TcpProxyConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
     config.upstream_host = "127.0.0.1";
@@ -595,7 +595,7 @@ TEST(TcpProxyServerTest, ProxiesTcpTrafficToUpstream) {
     config.timeouts.connect = 500ms;
     config.timeouts.inactivity = 2s;
 
-    iouring_runtime::proxy::TcpProxyServer proxy(config);
+    iouring::stream::TcpProxyServer proxy(config);
     proxy.Start();
 
     const int client = ConnectWithRetry(config.listen_port);
@@ -619,7 +619,7 @@ TEST(TcpProxyServerTest, WritesRuntimeMetricsSnapshotAtomically) {
     std::filesystem::create_directories(metrics_dir);
     const auto metrics_file = metrics_dir / "tcp_reverse_proxy.metrics.json";
 
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring::stream::TcpProxyConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
     config.upstream_host = "127.0.0.1";
@@ -639,7 +639,7 @@ TEST(TcpProxyServerTest, WritesRuntimeMetricsSnapshotAtomically) {
         .upstream_port = upstream.Port(),
     });
 
-    iouring_runtime::proxy::TcpProxyServer proxy(config);
+    iouring::stream::TcpProxyServer proxy(config);
     proxy.Start();
     ASSERT_TRUE(proxy.WriteMetricsSnapshot());
 
@@ -663,7 +663,7 @@ TEST(TcpProxyServerTest, TerminatesDownstreamTlsAndProxiesTraffic) {
     ASSERT_FALSE(tls_files.cert_path.empty());
     ASSERT_FALSE(tls_files.key_path.empty());
 
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring::stream::TcpProxyConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
     config.upstream_host = "127.0.0.1";
@@ -678,7 +678,7 @@ TEST(TcpProxyServerTest, TerminatesDownstreamTlsAndProxiesTraffic) {
     config.downstream_tls.certificate_chain_file = tls_files.cert_path;
     config.downstream_tls.private_key_file = tls_files.key_path;
 
-    iouring_runtime::proxy::TcpProxyServer proxy(config);
+    iouring::stream::TcpProxyServer proxy(config);
     proxy.Start();
 
     ASSERT_EQ(OPENSSL_init_ssl(0, nullptr), 1);
@@ -710,7 +710,7 @@ TEST(TcpProxyServerTest, FlushesUpstreamResponseBeforeClosingDownstreamTls) {
     ASSERT_FALSE(tls_files.cert_path.empty());
     ASSERT_FALSE(tls_files.key_path.empty());
 
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring::stream::TcpProxyConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
     config.upstream_host = "127.0.0.1";
@@ -725,7 +725,7 @@ TEST(TcpProxyServerTest, FlushesUpstreamResponseBeforeClosingDownstreamTls) {
     config.downstream_tls.certificate_chain_file = tls_files.cert_path;
     config.downstream_tls.private_key_file = tls_files.key_path;
 
-    iouring_runtime::proxy::TcpProxyServer proxy(config);
+    iouring::stream::TcpProxyServer proxy(config);
     proxy.Start();
 
     ASSERT_EQ(OPENSSL_init_ssl(0, nullptr), 1);
@@ -757,7 +757,7 @@ TEST(TcpProxyServerTest, FlushesLargeSniRoutedUpstreamResponse) {
     ASSERT_FALSE(tls_files.cert_path.empty());
     ASSERT_FALSE(tls_files.key_path.empty());
 
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring::stream::TcpProxyConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
     config.upstream_host = "127.0.0.1";
@@ -777,7 +777,7 @@ TEST(TcpProxyServerTest, FlushesLargeSniRoutedUpstreamResponse) {
     config.downstream_tls.certificate_chain_file = tls_files.cert_path;
     config.downstream_tls.private_key_file = tls_files.key_path;
 
-    iouring_runtime::proxy::TcpProxyServer proxy(config);
+    iouring::stream::TcpProxyServer proxy(config);
     proxy.Start();
 
     ASSERT_EQ(OPENSSL_init_ssl(0, nullptr), 1);
@@ -810,7 +810,7 @@ TEST(TcpProxyServerTest, RoutesDownstreamTlsBySni) {
     ASSERT_FALSE(tls_files.cert_path.empty());
     ASSERT_FALSE(tls_files.key_path.empty());
 
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring::stream::TcpProxyConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
     config.upstream_host = "127.0.0.1";
@@ -830,7 +830,7 @@ TEST(TcpProxyServerTest, RoutesDownstreamTlsBySni) {
     config.downstream_tls.certificate_chain_file = tls_files.cert_path;
     config.downstream_tls.private_key_file = tls_files.key_path;
 
-    iouring_runtime::proxy::TcpProxyServer proxy(config);
+    iouring::stream::TcpProxyServer proxy(config);
     proxy.Start();
 
     ASSERT_EQ(OPENSSL_init_ssl(0, nullptr), 1);
@@ -875,7 +875,7 @@ TEST(TcpProxyServerTest, ReloadsDownstreamTlsWithoutDroppingExistingSessions) {
     ASSERT_FALSE(tls_files.cert_path.empty());
     ASSERT_FALSE(tls_files.key_path.empty());
 
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring::stream::TcpProxyConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
     config.upstream_host = "127.0.0.1";
@@ -890,7 +890,7 @@ TEST(TcpProxyServerTest, ReloadsDownstreamTlsWithoutDroppingExistingSessions) {
     config.downstream_tls.certificate_chain_file = tls_files.cert_path;
     config.downstream_tls.private_key_file = tls_files.key_path;
 
-    iouring_runtime::proxy::TcpProxyServer proxy(config);
+    iouring::stream::TcpProxyServer proxy(config);
     proxy.Start();
 
     ASSERT_EQ(OPENSSL_init_ssl(0, nullptr), 1);
@@ -942,7 +942,7 @@ TEST(AcmeHttpChallengeServerTest, ServesHttp01ChallengeFiles) {
     auto challenge_files = CreateTestChallengeFiles();
     ASSERT_FALSE(challenge_files.dir.empty());
 
-    iouring_runtime::proxy::AcmeHttpChallengeConfig config;
+    iouring::stream::AcmeHttpChallengeConfig config;
     config.listen_host = "127.0.0.1";
     config.listen_port = ReserveTcpPort();
     config.worker_count = 1;
@@ -953,7 +953,7 @@ TEST(AcmeHttpChallengeServerTest, ServesHttp01ChallengeFiles) {
     config.inactivity_timeout = 2s;
     config.webroot = challenge_files.dir;
 
-    iouring_runtime::proxy::AcmeHttpChallengeServer server(config);
+    iouring::stream::AcmeHttpChallengeServer server(config);
     server.Start();
 
     const int client = ConnectWithRetry(config.listen_port);

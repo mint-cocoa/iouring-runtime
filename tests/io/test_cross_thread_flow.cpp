@@ -1,5 +1,5 @@
-#include <iouring_runtime/core/SendQueue.h>
-#include <iouring_runtime/core/MpscQueue.h>
+#include <iouring/core/SendQueue.h>
+#include <iouring/core/MpscQueue.h>
 
 #include <gtest/gtest.h>
 
@@ -11,8 +11,8 @@
 #include <thread>
 #include <vector>
 
-using namespace iouring_runtime::core;
-using namespace iouring_runtime::core::buffer;
+using namespace iouring::core;
+using namespace iouring::core::buffer;
 
 // ── Lightweight test message types (no GameServer dependency) ─
 

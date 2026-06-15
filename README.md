@@ -18,15 +18,15 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-Build every optional module and example:
+Build every optional module:
 
 ```bash
 cmake -S . -B build-all \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_WEB=ON \
-  -DBUILD_PROXY=ON \
+  -DBUILD_HTTP=ON \
+  -DBUILD_STREAM=ON \
   -DBUILD_GAME=ON \
-  -DBUILD_EXAMPLES=ON
+  -DBUILD_MEDIA=ON
 cmake --build build-all -j$(nproc)
 ```
 
@@ -35,8 +35,8 @@ Run tests:
 ```bash
 cmake -S . -B build-tests \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_WEB=ON \
-  -DBUILD_PROXY=ON \
+  -DBUILD_HTTP=ON \
+  -DBUILD_STREAM=ON \
   -DBUILD_GAME=ON \
   -DBUILD_TESTS=ON
 cmake --build build-tests -j$(nproc)
@@ -47,76 +47,45 @@ ctest --test-dir build-tests --output-on-failure
 
 | Use case | Link target | Public headers |
 | --- | --- | --- |
-| Custom TCP server | `iouring_runtime::Runtime` | `<iouring_runtime/core/...>` |
-| HTTP app | `iouring_runtime_web::RuntimeWeb` | `<iouring_runtime/web/...>` |
-| TCP reverse proxy | `iouring_runtime_proxy::RuntimeProxy` | `<iouring_runtime/proxy/...>` |
-| Packet game server | `iouring_runtime_game::RuntimeGame` | `<iouring_runtime/game/...>` |
-| HLS/media helpers | `iouring_runtime::RuntimeMedia` | `<iouring_runtime/media/...>` |
-| Logging/profiling helpers | `iouring_runtime::RuntimeObservability` | `<iouring_runtime/observability/...>` |
+| Custom TCP server | `iouring::runtime` | `<iouring/core/...>` |
+| HTTP app | `iouring::http` | `<iouring/http/...>` |
+| TCP reverse proxy | `iouring::stream` | `<iouring/stream/...>` |
+| Packet game server | `iouring::game` | `<iouring/game/...>` |
+| HLS/media helpers | `iouring::media` | `<iouring/media/...>` |
+| Logging/profiling helpers | `iouring::observability` | `<iouring/observability/...>` |
 
 Example:
 
 ```cmake
 target_link_libraries(my_app PRIVATE
-    iouring_runtime_web::RuntimeWeb
+    iouring::http
 )
 ```
 
 ```cpp
-#include <iouring_runtime/web/WebServer.h>
-#include <iouring_runtime/web/HttpResponse.h>
+#include <iouring/http/WebServer.h>
+#include <iouring/http/HttpResponse.h>
 ```
 
-## Run The Examples
+## Examples
 
-Core TCP echo:
-
-```bash
-cmake -S . -B build-core \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_EXAMPLES=ON \
-  -DBUILD_TESTS=OFF
-cmake --build build-core --target core_echo -j$(nproc)
-CORE_ECHO_PORT=19090 ./build-core/bin/core_echo
-```
-
-HTTP hello server:
+Runnable examples and demo apps live in the separate
+`iouring-runtime-examples` repository. Build and install this runtime first,
+then configure the examples with `CMAKE_PREFIX_PATH`:
 
 ```bash
-cmake -S . -B build-web \
+cmake -S . -B build-all \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_WEB=ON \
-  -DBUILD_EXAMPLES=ON \
-  -DBUILD_TESTS=OFF
-cmake --build build-web --target hello_http -j$(nproc)
-HELLO_HTTP_PORT=8080 ./build-web/bin/hello_http
-```
-
-TCP reverse proxy:
-
-```bash
-cmake -S . -B build-proxy \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_PROXY=ON \
-  -DBUILD_EXAMPLES=ON \
-  -DBUILD_TESTS=OFF
-cmake --build build-proxy --target tcp_reverse_proxy -j$(nproc)
-TCP_PROXY_LISTEN_PORT=18080 \
-TCP_PROXY_UPSTREAM_HOST=127.0.0.1 \
-TCP_PROXY_UPSTREAM_PORT=8080 \
-./build-proxy/bin/tcp_reverse_proxy
-```
-
-Game packet echo:
-
-```bash
-cmake -S . -B build-game \
-  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_HTTP=ON \
+  -DBUILD_STREAM=ON \
   -DBUILD_GAME=ON \
-  -DBUILD_EXAMPLES=ON \
-  -DBUILD_TESTS=OFF
-cmake --build build-game --target dungeon_packet_echo -j$(nproc)
-DUNGEON_PACKET_ECHO_PORT=19110 ./build-game/bin/dungeon_packet_echo
+  -DBUILD_MEDIA=ON
+cmake --build build-all -j$(nproc)
+cmake --install build-all --prefix /tmp/iouring-install
+
+cmake -S ../iouring-runtime-examples -B ../iouring-runtime-examples/build \
+  -DCMAKE_PREFIX_PATH=/tmp/iouring-install
+cmake --build ../iouring-runtime-examples/build -j$(nproc)
 ```
 
 ## Install And Consume
@@ -128,37 +97,36 @@ cmake --install build-all --prefix /tmp/iouring-runtime-install
 Core consumer:
 
 ```cmake
-find_package(iouring_runtime CONFIG REQUIRED)
+find_package(iouring CONFIG REQUIRED)
 
 target_link_libraries(my_echo PRIVATE
-    iouring_runtime::Runtime
+    iouring::runtime
 )
 ```
 
 Web consumer:
 
 ```cmake
-find_package(iouring_runtime_web CONFIG REQUIRED)
+find_package(iouring CONFIG REQUIRED)
 
 target_link_libraries(my_web_app PRIVATE
-    iouring_runtime_web::RuntimeWeb
+    iouring::http
 )
 ```
 
 ## Repository Map
 
-- `include/iouring_runtime/`: public headers grouped by module
-- `src/runtime/`: core runtime implementation
-- `src/modules/`: optional web, proxy, game, media, and observability modules
-- `app/examples/`: runnable examples for each module
-- `app/activity-server/`: C++ Activity backend built on the runtime
+- `include/iouring/`: public headers grouped by layer and module
+- `src/os/`, `src/event/`, `src/net/`: core runtime implementation
+- `src/http/`, `src/stream/`, `src/game/`, `src/media/`, `src/observability/`: optional modules
+- `benchmarks/`: runtime benchmark servers and wrk helpers
 - `tests/`: focused runtime and module tests
-- `scripts/`: sanitizer and benchmarking helpers
+- `tools/`: sanitizer and maintenance helpers
 - `deploy/`: home-lab Kubernetes manifests
 
 ## Docs
 
-- `docs/getting-started.md`: fastest path from clone to running examples
+- `docs/getting-started.md`: fastest path from clone to building the runtime
 - `docs/usage-examples.md`: copyable CMake and C++ usage snippets
 - `docs/api-reference.md`: target, header, and public type reference
 - `docs/runtime-guide.md`: core TCP runtime walkthrough

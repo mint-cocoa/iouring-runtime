@@ -1,6 +1,6 @@
 # Proxy Guide
 
-`iouring_runtime_proxy::RuntimeProxy` is an optional layer-4 TCP reverse proxy
+`iouring::stream` is an optional layer-4 TCP reverse proxy
 built on the core runtime.
 
 It can:
@@ -31,10 +31,18 @@ Build the proxy example:
 ```bash
 cmake -S . -B build-proxy \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_PROXY=ON \
-  -DBUILD_EXAMPLES=ON \
+  -DBUILD_STREAM=ON \
   -DBUILD_TESTS=OFF
-cmake --build build-proxy --target tcp_reverse_proxy -j$(nproc)
+cmake --build build-proxy -j$(nproc)
+cmake --install build-proxy --prefix /tmp/iouring-install
+
+cmake -S ../iouring-runtime-examples -B ../iouring-runtime-examples/build-proxy \
+  -DCMAKE_PREFIX_PATH=/tmp/iouring-install \
+  -DBUILD_CORE_EXAMPLES=OFF \
+  -DBUILD_HTTP_EXAMPLES=OFF \
+  -DBUILD_GAME_EXAMPLES=OFF \
+  -DBUILD_ACTIVITY_EXAMPLES=OFF
+cmake --build ../iouring-runtime-examples/build-proxy --target tcp_reverse_proxy -j$(nproc)
 ```
 
 Run:
@@ -44,7 +52,7 @@ TCP_PROXY_LISTEN_HOST=127.0.0.1 \
 TCP_PROXY_LISTEN_PORT=18080 \
 TCP_PROXY_UPSTREAM_HOST=127.0.0.1 \
 TCP_PROXY_UPSTREAM_PORT=8080 \
-./build-proxy/bin/tcp_reverse_proxy
+../iouring-runtime-examples/build-proxy/bin/tcp_reverse_proxy
 ```
 
 Try it:
@@ -56,35 +64,35 @@ curl http://127.0.0.1:18080/
 ## Use From CMake
 
 ```cmake
-find_package(iouring_runtime_proxy CONFIG REQUIRED)
+find_package(iouring_proxy CONFIG REQUIRED)
 
 add_executable(my_proxy src/main.cpp)
 target_link_libraries(my_proxy PRIVATE
-    iouring_runtime_proxy::RuntimeProxy
+    iouring::stream
 )
 target_compile_features(my_proxy PRIVATE cxx_std_23)
 ```
 
 ```cpp
-#include <iouring_runtime/proxy/TcpProxyServer.h>
+#include <iouring/stream/TcpProxyServer.h>
 ```
 
 Minimal server:
 
 ```cpp
 int main() {
-    iouring_runtime::proxy::TcpProxyConfig config;
+    iouring::stream::TcpProxyConfig config;
     config.listen_host = "0.0.0.0";
     config.listen_port = 18080;
     config.upstream_host = "127.0.0.1";
     config.upstream_port = 8080;
     config.worker_count = 1;
 
-    iouring_runtime::proxy::TcpProxyServer server(config);
-    iouring_runtime::proxy::TcpProxyServer::InstallStopSignalHandlers();
+    iouring::stream::TcpProxyServer server(config);
+    iouring::stream::TcpProxyServer::InstallStopSignalHandlers();
 
     server.Start();
-    iouring_runtime::proxy::TcpProxyServer::WaitForStopSignal(
+    iouring::stream::TcpProxyServer::WaitForStopSignal(
         std::chrono::milliseconds{100});
     server.Stop();
 }
@@ -153,16 +161,16 @@ Under systemd, the provided unit maps `systemctl reload` to the same signal.
 Deployment assets live in:
 
 ```text
-app/examples/proxy/tcp_reverse_proxy/deploy/
+iouring-runtime-examples/stream/tcp_reverse_proxy/deploy/
 ```
 
 Install the binary and service files:
 
 ```bash
 sudo install -D -m 0755 build-proxy/bin/tcp_reverse_proxy /usr/local/bin/tcp_reverse_proxy
-sudo install -D -m 0644 app/examples/proxy/tcp_reverse_proxy/deploy/tcp_reverse_proxy.service \
+sudo install -D -m 0644 iouring-runtime-examples/stream/tcp_reverse_proxy/deploy/tcp_reverse_proxy.service \
   /etc/systemd/system/tcp_reverse_proxy.service
-sudo install -D -m 0644 app/examples/proxy/tcp_reverse_proxy/deploy/tcp_reverse_proxy.env.example \
+sudo install -D -m 0644 iouring-runtime-examples/stream/tcp_reverse_proxy/deploy/tcp_reverse_proxy.env.example \
   /etc/iouring-runtime/tcp_reverse_proxy.env
 ```
 
@@ -192,9 +200,9 @@ sudo systemctl enable --now tcp_reverse_proxy.service
 Install helper scripts:
 
 ```bash
-sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-issue.sh \
+sudo install -D -m 0755 iouring-runtime-examples/stream/tcp_reverse_proxy/deploy/certbot-issue.sh \
   /usr/local/libexec/iouring-runtime/certbot-issue.sh
-sudo install -D -m 0755 app/examples/proxy/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
+sudo install -D -m 0755 iouring-runtime-examples/stream/tcp_reverse_proxy/deploy/certbot-renew-hook.sh \
   /etc/letsencrypt/renewal-hooks/deploy/tcp_reverse_proxy-reload.sh
 ```
 
@@ -224,8 +232,8 @@ Future renewals reload the service through the deploy hook.
 
 These web examples are useful proxy upstreams:
 
-- `app/examples/web/status_server/`
-- `app/examples/web/speedtest_server/`
-- `app/examples/web/file_store_server/`
-- `app/examples/web/dropapp/`
-- `app/examples/web/webhook_inbox/`
+- `iouring-runtime-examples/http/status_server/`
+- `iouring-runtime-examples/http/speedtest_server/`
+- `iouring-runtime-examples/http/file_store_server/`
+- `iouring-runtime-examples/http/dropapp/`
+- `iouring-runtime-examples/http/webhook_inbox/`

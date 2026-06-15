@@ -1,6 +1,6 @@
-#include <iouring_runtime/core/Listener.h>
-#include <iouring_runtime/core/SendBuffer.h>
-#include <iouring_runtime/core/IoRing.h>
+#include <iouring/net/Listener.h>
+#include <iouring/core/SendBuffer.h>
+#include <iouring/event/IoRing.h>
 
 #include <gtest/gtest.h>
 
@@ -15,11 +15,11 @@
 
 using namespace std::chrono_literals;
 
-using iouring_runtime::core::Address;
-using iouring_runtime::core::buffer::BufferPool;
-using iouring_runtime::core::io::Listener;
-using iouring_runtime::core::ring::IoRing;
-using iouring_runtime::core::ring::IoRingConfig;
+using iouring::core::Address;
+using iouring::core::buffer::BufferPool;
+using iouring::net::Listener;
+using iouring::event::IoRing;
+using iouring::event::IoRingConfig;
 
 namespace {
 
@@ -51,7 +51,7 @@ TEST(ListenerAcceptFlags, AcceptedSocketsAreNonBlocking) {
 
     auto listener = std::make_shared<Listener>(
         *ring, pool, Address{.host = "127.0.0.1", .port = 19882},
-        [&](int fd, IoRing&, BufferPool&, iouring_runtime::core::ContextId) -> iouring_runtime::core::io::SessionRef {
+        [&](int fd, IoRing&, BufferPool&, iouring::core::ContextId) -> iouring::net::SessionRef {
             accepted_flags.store(::fcntl(fd, F_GETFL, 0), std::memory_order_relaxed);
             factory_called.store(true, std::memory_order_relaxed);
             return nullptr;
